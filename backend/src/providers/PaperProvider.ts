@@ -7,7 +7,7 @@ export class PaperProvider implements ISoftwareProvider {
     name = 'Paper';
     category = 'High Performance Plugins';
 
-    private BASE_URL = 'https://api.papermc.io/v2/projects/paper';
+    private BASE_URL = 'https://fill.papermc.io/v3/projects/paper';
     private CACHE_TTL = 1000 * 60 * 60 * 1; // 1 hour for Paper builds
 
     async getMcVersions(): Promise<string[]> {
@@ -15,23 +15,33 @@ export class PaperProvider implements ISoftwareProvider {
             const response = await fetch(this.BASE_URL);
             if (!response.ok) throw new Error('Failed to fetch Paper versions');
             const data = await response.json();
-            return data.versions.reverse(); // Newest first
+            
+            const allVersions: string[] = [];
+            if (data.versions) {
+                // The new v3 API groups versions by major release (e.g. "1.21" -> ["1.21.11", ...])
+                for (const group of Object.values(data.versions)) {
+                    if (Array.isArray(group)) {
+                        allVersions.push(...group);
+                    }
+                }
+            }
+            return allVersions;
         });
     }
 
     async getReleases(mcVersion: string): Promise<ISoftwareRelease[]> {
         return cacheService.getCachedOrFetch(this.id, `releases_${mcVersion}`, this.CACHE_TTL, async () => {
-            const response = await fetch(`${this.BASE_URL}/versions/${mcVersion}`);
+            const response = await fetch(`${this.BASE_URL}/versions/${mcVersion}/builds`);
             if (!response.ok) throw new Error('Failed to fetch Paper builds');
             const data = await response.json();
             
-            if (!data.builds) return [];
+            if (!Array.isArray(data)) return [];
             
-            // Paper provides an array of build numbers
-            return data.builds.reverse().map((build: number) => ({
-                id: build.toString(),
-                displayVersion: `${mcVersion}-#${build}`,
-                isStable: true // Paper v2 API generally lists stable/experimental, we'll assume stable for MVP
+            // v3 API returns an array of build objects (newest first)
+            return data.map((build: any) => ({
+                id: build.id.toString(),
+                displayVersion: `${mcVersion}-#${build.id}`,
+                isStable: build.channel !== 'EXPERIMENTAL'
             }));
         });
     }
@@ -41,17 +51,20 @@ export class PaperProvider implements ISoftwareProvider {
     }
 
     async getDownloadInfo(mcVersion: string, release: ISoftwareRelease): Promise<{ url: string, checksum?: string }> {
-        const build = release.id;
-        const jarName = `paper-${mcVersion}-${build}.jar`;
-        const url = `${this.BASE_URL}/versions/${mcVersion}/builds/${build}/downloads/${jarName}`;
-        
-        // Fetch checksum
-        const response = await fetch(`${this.BASE_URL}/versions/${mcVersion}/builds/${build}`);
+        const response = await fetch(`${this.BASE_URL}/versions/${mcVersion}/builds`);
         if (!response.ok) throw new Error('Failed to fetch build checksum');
         const data = await response.json();
-        const checksum = data.downloads?.application?.sha256;
+        
+        const build = data.find((b: any) => b.id.toString() === release.id);
+        if (!build || !build.downloads || !build.downloads['server:default']) {
+            throw new Error('Build download not found');
+        }
 
-        return { url, checksum };
+        const downloadInfo = build.downloads['server:default'];
+        return { 
+            url: downloadInfo.url, 
+            checksum: downloadInfo.checksums?.sha256 
+        };
     }
 
     async install(serverDir: string, mcVersion: string, release: ISoftwareRelease): Promise<void> {

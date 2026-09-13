@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useServersStore } from '../../store/useServersStore';
 import { Save, AlertTriangle } from 'lucide-react';
 import axios from 'axios';
@@ -8,6 +8,7 @@ export const Settings = () => {
     const { id } = useParams<{id: string}>();
     const server = useServersStore(s => s.servers.find(srv => srv.id === id));
     const fetchServers = useServersStore(s => s.fetchServers);
+    const navigate = useNavigate();
 
     // Instance State
     const [name, setName] = useState('');
@@ -15,6 +16,22 @@ export const Settings = () => {
     const [minRam, setMinRam] = useState(1024);
     const [maxRam, setMaxRam] = useState(2048);
     const [savingInstance, setSavingInstance] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDelete = async () => {
+        if (!window.confirm('Are you absolutely sure you want to delete this server? All files and worlds will be permanently destroyed!')) return;
+        
+        setIsDeleting(true);
+        try {
+            await axios.delete(`/api/servers/${id}`);
+            await fetchServers();
+            navigate('/');
+        } catch (e) {
+            console.error("Failed to delete server", e);
+            alert('Failed to delete server. Check the console for details.');
+            setIsDeleting(false);
+        }
+    };
 
     // Properties State
     const [properties, setProperties] = useState<Record<string, string>>({});
@@ -280,8 +297,12 @@ export const Settings = () => {
                         <h4 className="text-white font-medium mb-1">Delete Server</h4>
                         <p className="text-sm text-slate-400">Permanently remove this server and all its files. This action cannot be undone.</p>
                     </div>
-                    <button className="glass-button bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:text-red-300 px-6 py-2">
-                        Delete Server
+                    <button 
+                        className="glass-button bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 hover:text-red-300 px-6 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                    >
+                        {isDeleting ? 'Deleting...' : 'Delete Server'}
                     </button>
                 </div>
             </div>

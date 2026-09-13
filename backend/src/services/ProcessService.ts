@@ -82,22 +82,27 @@ export class ProcessService {
     }
 
     public async stopServer(id: string, timeoutMs: number = 60000): Promise<void> {
-        await this.sendCommand(id, 'stop');
         await prisma.server.update({ where: { id }, data: { status: ServerStatus.STOPPING } });
         wsService.emitServerStatus(id, ServerStatus.STOPPING);
 
-        const start = Date.now();
-        while (Date.now() - start < timeoutMs) {
-            if (!(await this.hasSession(id))) {
-                await prisma.server.update({ where: { id }, data: { status: ServerStatus.OFFLINE, lastStoppedAt: new Date() } });
-        wsService.emitServerStatus(id, ServerStatus.OFFLINE);
-                wsService.emitServerStatus(id, ServerStatus.OFFLINE);
-                return;
+        if (await this.hasSession(id)) {
+            await this.sendCommand(id, 'stop');
+            
+            const start = Date.now();
+            while (await this.hasSession(id)) {
+                if (Date.now() - start > timeoutMs) {
+                    await this.forceKill(id);
+                    break;
+                }
+                await new Promise(r => setTimeout(r, 1000));
             }
-            await new Promise(r => setTimeout(r, 1000));
         }
         
-        await this.forceKill(id);
+        await prisma.server.update({ 
+            where: { id }, 
+            data: { status: ServerStatus.OFFLINE, tmuxSessionName: null, lastKnownPid: null } 
+        });
+        wsService.emitServerStatus(id, ServerStatus.OFFLINE);
     }
 
     public async forceKill(id: string): Promise<void> {
@@ -106,7 +111,11 @@ export class ProcessService {
         } catch (e) {
             // Ignore if already dead
         }
-        await prisma.server.update({ where: { id }, data: { status: ServerStatus.OFFLINE, lastStoppedAt: new Date() } });
+        await prisma.server.update({ 
+            where: { id }, 
+            data: { status: ServerStatus.CRASHED, tmuxSessionName: null, lastKnownPid: null } 
+        });
+        wsService.emitServerStatus(id, ServerStatus.CRASHED);
     }
 
     public async getConsoleHistory(id: string, lines: number = 1000): Promise<string> {

@@ -14,6 +14,7 @@ import worldsRoutes from './routes/worlds.routes';
 import { ReconciliationService } from './services/ReconciliationService';
 import { wsService } from './services/WebSocketService';
 import { MetricsStreamer } from './services/MetricsStreamer';
+import { JavaDiscoveryService } from './services/JavaDiscoveryService';
 
 export const prisma = new PrismaClient();
 const app = express();
@@ -58,6 +59,9 @@ async function bootstrap() {
         await prisma.$connect();
         console.log('Connected to SQLite Database.');
         
+        const javaDiscovery = new JavaDiscoveryService();
+        await javaDiscovery.discoverInstalledRuntimes();
+
         const reconciliationService = new ReconciliationService();
         await reconciliationService.reconcileOnStartup();
 

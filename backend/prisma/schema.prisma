@@ -17,6 +17,7 @@ model Server {
   maxRamMb         Int
   eulaAccepted     Boolean   @default(false)
   javaRuntimeId    String?
+  javaRuntime      JavaRuntime? @relation(fields: [javaRuntimeId], references: [id])
 
   status           String    @default("RECOVERING")
   tmuxSessionName  String?   @unique
@@ -46,6 +47,7 @@ model JavaRuntime {
   name             String  
   path             String  
   majorVersion     Int     
+  servers          Server[]
 }
 
 model Backup {

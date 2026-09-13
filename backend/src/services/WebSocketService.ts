@@ -3,8 +3,12 @@ import http from 'http';
 import { processService } from './ProcessService';
 import { consoleStreamer } from './ConsoleStreamer';
 
+import pidusage from 'pidusage';
+import { prisma } from '../index';
+
 export class WebSocketService {
     public io!: Server;
+    private statsInterval: NodeJS.Timeout | null = null;
 
     public init(server: http.Server) {
         this.io = new Server(server, {
@@ -25,7 +29,6 @@ export class WebSocketService {
                 socket.join(`server_${serverId}`);
                 console.log(`[WS] Client ${socket.id} subscribed to server_${serverId}`);
                 
-                // Send history immediately upon subscription
                 try {
                     const history = await processService.getConsoleHistory(serverId, 1000);
                     socket.emit('consoleHistory', { serverId, history });
@@ -33,7 +36,6 @@ export class WebSocketService {
                     console.error(`Failed to send history for ${serverId}`, e);
                 }
 
-                // Ensure the console streamer is running for this server
                 consoleStreamer.startStreaming(serverId, this.io);
             });
 
@@ -53,23 +55,66 @@ export class WebSocketService {
 
             socket.on('disconnect', () => {
                 console.log(`[WS] Client disconnected: ${socket.id}`);
-                // Socket.io automatically leaves rooms on disconnect.
-                // We could hook into adapter room leaving to stop streamers.
             });
         });
 
-        // Listen for room emptiness to stop tailing
         this.io.of('/').adapter.on('leave-room', (room: string) => {
             if (room.startsWith('server_')) {
                 const serverId = room.replace('server_', '');
                 consoleStreamer.checkAndStopStreaming(serverId, this.io);
             }
         });
+
+        this.startStatsBroadcaster();
+    }
+
+    private startStatsBroadcaster() {
+        if (this.statsInterval) clearInterval(this.statsInterval);
+        
+        this.statsInterval = setInterval(async () => {
+            if (!this.io) return;
+            const rooms = this.io.of('/').adapter.rooms;
+            const serverIdsToPoll = new Set<string>();
+
+            for (const [roomName] of rooms.entries()) {
+                if (roomName.startsWith('server_')) {
+                    serverIdsToPoll.add(roomName.replace('server_', ''));
+                }
+            }
+
+            if (serverIdsToPoll.size === 0) return;
+
+            try {
+                const servers = await prisma.server.findMany({
+                    where: { id: { in: Array.from(serverIdsToPoll) }, status: { in: ['RUNNING', 'STARTING'] } }
+                });
+
+                for (const server of servers) {
+                    if (!server.lastKnownPid) continue;
+
+                    try {
+                        const stats = await pidusage(server.lastKnownPid);
+                        const uptimeMs = server.lastStartedAt ? Date.now() - new Date(server.lastStartedAt).getTime() : 0;
+                        
+                        this.io.to(`server_${server.id}`).emit('serverStats', {
+                            serverId: server.id,
+                            cpu: stats.cpu,
+                            memory: stats.memory,
+                            uptimeMs
+                        });
+                    } catch (e) {
+                        // pidusage might fail if process died
+                    }
+                }
+            } catch (e) {
+                console.error("[WS] Error in stats broadcaster:", e);
+            }
+        }, 3000);
     }
 
     public emitServerStatus(serverId: string, status: string) {
         if (this.io) {
-            this.io.to(`server_${serverId}`).emit('serverStatus', { serverId, status });
+            this.io.emit('serverStatus', { serverId, status });
         }
     }
 }

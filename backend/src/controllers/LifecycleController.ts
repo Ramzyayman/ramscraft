@@ -9,7 +9,10 @@ import path from 'path';
 export class LifecycleController {
     static async start(req: Request, res: Response) {
         try {
-            const server = await prisma.server.findUnique({ where: { id: req.params.id }, include: { software: true } });
+            const server = await prisma.server.findUnique({ 
+                where: { id: req.params.id }, 
+                include: { software: true, javaRuntime: true } 
+            });
             if (!server) return res.status(404).json({ error: 'Server not found' });
             
             if (server.status !== ServerStatus.OFFLINE && server.status !== ServerStatus.CRASHED) {
@@ -37,7 +40,35 @@ export class LifecycleController {
             const provider = providerRegistry.get(server.software.provider);
             const jarName = 'server.jar'; // Assume downloaded jar is named this for now
             const args = provider.getStartupArgs(server.minRamMb, server.maxRamMb, jarName);
-            const cmd = `java ${args.join(' ')}`;
+            
+            // Java Compatibility Check & Auto-selection
+            const javaCompat = await provider.getJavaCompatibility(server.software.mcVersion, { id: server.software.releaseId, displayVersion: '', isStable: true });
+            let javaExecutable = 'java';
+            
+            let selectedRuntime = server.javaRuntime;
+            if (selectedRuntime && selectedRuntime.majorVersion < javaCompat.minVersion) {
+                selectedRuntime = null; // Configured runtime is invalid, we must find a valid one
+            }
+
+            if (!selectedRuntime) {
+                // Auto-detect a compatible runtime
+                const compatibleRuntimes = await prisma.javaRuntime.findMany({
+                    where: { majorVersion: { gte: javaCompat.minVersion } },
+                    orderBy: { majorVersion: 'asc' }
+                });
+                if (compatibleRuntimes.length > 0) {
+                    selectedRuntime = compatibleRuntimes[0];
+                }
+            }
+
+            if (!selectedRuntime) {
+                return res.status(400).json({ 
+                    error: `Minecraft ${server.software.mcVersion} requires Java ${javaCompat.minVersion} or newer, but it is not installed on the system. Please install it and restart the RamsCraft backend to detect it.` 
+                });
+            }
+
+            javaExecutable = selectedRuntime.path;
+            const cmd = `${javaExecutable} ${args.join(' ')}`;
 
             await processService.startServer(server.id, cmd, serverDir);
             res.json({ success: true, status: ServerStatus.STARTING });

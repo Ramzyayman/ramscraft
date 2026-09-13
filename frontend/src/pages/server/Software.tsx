@@ -106,7 +106,7 @@ export const Software = () => {
                                 disabled={isInstalling}
                             >
                                 <option value="">Select Provider...</option>
-                                {providers.map(p => <option key={p} value={p}>{p}</option>)}
+                                {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                             </select>
                         </div>
                         <div>
@@ -130,7 +130,7 @@ export const Software = () => {
                                 disabled={!selectedVersion || isInstalling}
                             >
                                 <option value="">Select Release...</option>
-                                {releases.map(r => <option key={r.id} value={r.id}>{r.id} ({new Date(r.time).toLocaleDateString()})</option>)}
+                                {releases.map(r => <option key={r.id} value={r.id}>{r.displayVersion}</option>)}
                             </select>
                         </div>
                     </div>

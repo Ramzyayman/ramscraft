@@ -47,6 +47,14 @@ export class MetricsStreamer {
                 where: { status: ServerStatus.STARTING }
             });
             for (const server of startingServers) {
+                const hasSession = await processService.hasSession(server.id);
+                if (!hasSession) {
+                    await prisma.server.update({ where: { id: server.id }, data: { status: ServerStatus.OFFLINE } });
+                    wsService.emitServerStatus(server.id, ServerStatus.OFFLINE);
+                    console.log(`[MetricsStreamer] Server ${server.id} crashed during startup.`);
+                    continue;
+                }
+
                 const isOnline = await this.pingServer(server.port);
                 if (isOnline) {
                     await prisma.server.update({ where: { id: server.id }, data: { status: ServerStatus.ONLINE } });

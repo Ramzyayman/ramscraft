@@ -18,6 +18,9 @@ export class JavaVersionHelper {
     }
 
     public static getStandardJavaRules(mcVersion: string): IJavaCompatibility {
+        if (this.isGreaterThanOrEqual(mcVersion, '26.1')) {
+            return { minVersion: 25, recommendedVersion: 25, supportedVersions: [25] };
+        }
         if (this.isGreaterThanOrEqual(mcVersion, '1.20.5')) {
             return { minVersion: 21, recommendedVersion: 21, supportedVersions: [21] };
         }

@@ -12,20 +12,21 @@ export const Console = ({ serverId }: { serverId: string }) => {
                 setLines(prev => [...prev, data.line].slice(-1000));
             }
         };
-        const handleHistory = (data: {serverId: string, lines: string[]}) => {
+        const handleHistory = (data: {serverId: string, history: string}) => {
             if (data.serverId === serverId) {
-                setLines(data.lines);
+                setLines(data.history.split('\n').filter(l => l));
             }
         };
 
-        socket.on('consoleLog', handleLog);
+        socket.on('consoleLine', handleLog);
         socket.on('consoleHistory', handleHistory);
 
-        socket.emit('subscribeConsole', serverId);
+        socket.emit('subscribe:server', serverId);
 
         return () => {
-            socket.off('consoleLog', handleLog);
+            socket.off('consoleLine', handleLog);
             socket.off('consoleHistory', handleHistory);
+            socket.emit('unsubscribe:server', serverId);
         };
     }, [serverId]);
 
@@ -36,7 +37,7 @@ export const Console = ({ serverId }: { serverId: string }) => {
     const handleCommand = (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim()) return;
-        socket.emit('consoleCommand', { serverId, command: input });
+        socket.emit('sendCommand', { serverId, command: input });
         setInput('');
     };
 
