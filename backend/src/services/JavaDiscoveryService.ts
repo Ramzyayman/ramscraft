@@ -1,10 +1,7 @@
 import { prisma } from '../index';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { run } from '../utils/exec';
 import fs from 'fs';
 import path from 'path';
-
-const execAsync = promisify(exec);
 
 export class JavaDiscoveryService {
     public async discoverInstalledRuntimes(): Promise<void> {
@@ -20,9 +17,9 @@ export class JavaDiscoveryService {
                     const javaPath = path.join(dir, entry.name, 'bin', 'java');
                     if (fs.existsSync(javaPath)) {
                         try {
-                            const { stderr } = await execAsync(`"${javaPath}" -version`);
-                            // stderr contains output like: openjdk version "21.0.1" ...
-                            const versionMatch = stderr.match(/version "([^"]+)"/);
+                            const { stderr, stdout } = await run(javaPath, ['-version'], { timeoutMs: 10000 });
+                            // Version output is on stderr for most JDKs: openjdk version "21.0.1" ...
+                            const versionMatch = (stderr || stdout).match(/version "([^"]+)"/);
                             if (versionMatch) {
                                 const fullVersion = versionMatch[1];
                                 const major = parseInt(fullVersion.split('.')[0], 10);

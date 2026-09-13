@@ -1,0 +1,23 @@
+[Unit]
+Description=RamsCraft Minecraft control panel
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=ramzy
+WorkingDirectory=/home/ramzy/ramscraft/backend
+EnvironmentFile=-/home/ramzy/ramscraft/backend/.env
+# Absolute path to the Node 20 runtime installed via nvm (see DEPLOYMENT.md).
+ExecStart=/home/ramzy/.nvm/versions/node/v20.20.2/bin/node dist/index.js
+Restart=always
+RestartSec=3
+# Only stop the Node process on restart/stop. The managed Minecraft servers run in
+# detached tmux sessions and MUST survive a backend restart (reconciliation re-adopts
+# them on boot). control-group (the default) would kill them with the cgroup.
+KillMode=process
+# Console logs are written by the app; capture stdout/stderr too.
+StandardOutput=append:/home/ramzy/ramscraft/backend/service.log
+StandardError=append:/home/ramzy/ramscraft/backend/service.log
+
+[Install]
+WantedBy=multi-user.target

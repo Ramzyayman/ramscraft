@@ -1,4 +1,4 @@
-import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility } from './ISoftwareProvider';
+import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility, IDownloadInfo } from './ISoftwareProvider';
 import { cacheService } from '../services/MetadataCacheService';
 import { JavaVersionHelper } from './JavaVersionHelper';
 
@@ -40,7 +40,7 @@ export class VanillaProvider implements ISoftwareProvider {
         return JavaVersionHelper.getStandardJavaRules(mcVersion);
     }
 
-    async getDownloadInfo(mcVersion: string, release: ISoftwareRelease): Promise<{ url: string, checksum?: string }> {
+    async getDownloadInfo(mcVersion: string, release: ISoftwareRelease): Promise<IDownloadInfo> {
         return cacheService.getCachedOrFetch(this.id, `download_${release.id}`, this.CACHE_TTL, async () => {
             const manifestResponse = await fetch(this.MANIFEST_URL);
             const manifest = await manifestResponse.json();
@@ -53,7 +53,8 @@ export class VanillaProvider implements ISoftwareProvider {
 
             return {
                 url: meta.downloads.server.url,
-                checksum: meta.downloads.server.sha1
+                checksum: meta.downloads.server.sha1,
+                checksumAlgo: 'sha1' as const
             };
         });
     }

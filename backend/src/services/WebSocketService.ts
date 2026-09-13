@@ -2,114 +2,73 @@ import { Server, Socket } from 'socket.io';
 import http from 'http';
 import { processService } from './ProcessService';
 import { consoleStreamer } from './ConsoleStreamer';
-
-import pidusage from 'pidusage';
-import { prisma } from '../index';
+import { config, isLoopbackAddress } from '../config';
 
 export class WebSocketService {
     public io!: Server;
-    private statsInterval: NodeJS.Timeout | null = null;
 
     public init(server: http.Server) {
         this.io = new Server(server, {
             cors: {
-                origin: '*',
+                // Same-origin by default; only explicitly allowed origins may connect.
+                origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : false,
                 methods: ['GET', 'POST']
             }
         });
 
-        this.io.on('connection', (socket: Socket) => {
-            console.log(`[WS] Client connected: ${socket.id}`);
+        // Authenticate every socket at handshake. Same policy as the REST guard:
+        // a valid token if one is configured, otherwise loopback-only.
+        this.io.use((socket, next) => {
+            const addr = socket.handshake.address;
+            const auth = (socket.handshake.auth || {}) as any;
+            const token = auth.token
+                || (socket.handshake.headers['authorization'] || '').toString().replace(/^Bearer\s+/i, '')
+                || (socket.handshake.query.token as string);
 
-            socket.on('subscribe:host', () => {
-                socket.join('host');
-            });
+            if (config.apiToken) {
+                if (token && timingSafeEqual(token, config.apiToken)) return next();
+                return next(new Error('unauthorized'));
+            }
+            if (isLoopbackAddress(addr)) return next();
+            return next(new Error('unauthorized: token required for remote access'));
+        });
+
+        this.io.on('connection', (socket: Socket) => {
+            socket.on('subscribe:host', () => socket.join('host'));
 
             socket.on('subscribe:server', async (serverId: string) => {
+                if (typeof serverId !== 'string') return;
                 socket.join(`server_${serverId}`);
-                console.log(`[WS] Client ${socket.id} subscribed to server_${serverId}`);
-                
                 try {
                     const history = await processService.getConsoleHistory(serverId, 1000);
                     socket.emit('consoleHistory', { serverId, history });
                 } catch (e) {
                     console.error(`Failed to send history for ${serverId}`, e);
                 }
-
                 consoleStreamer.startStreaming(serverId, this.io);
             });
 
             socket.on('unsubscribe:server', (serverId: string) => {
                 socket.leave(`server_${serverId}`);
-                console.log(`[WS] Client ${socket.id} unsubscribed from server_${serverId}`);
                 consoleStreamer.checkAndStopStreaming(serverId, this.io);
             });
 
             socket.on('sendCommand', async (data: { serverId: string, command: string }) => {
                 try {
+                    if (!data || typeof data.serverId !== 'string' || typeof data.command !== 'string') return;
                     await processService.sendCommand(data.serverId, data.command);
                 } catch (e) {
-                    socket.emit('consoleLine', { serverId: data.serverId, line: `\x1b[31m[RamsCraft] Error sending command: ${(e as Error).message}\x1b[0m` });
+                    socket.emit('consoleLine', { serverId: data?.serverId, line: `[RamsCraft] Error sending command: ${(e as Error).message}` });
                 }
-            });
-
-            socket.on('disconnect', () => {
-                console.log(`[WS] Client disconnected: ${socket.id}`);
             });
         });
 
         this.io.of('/').adapter.on('leave-room', (room: string) => {
             if (room.startsWith('server_')) {
-                const serverId = room.replace('server_', '');
-                consoleStreamer.checkAndStopStreaming(serverId, this.io);
+                consoleStreamer.checkAndStopStreaming(room.replace('server_', ''), this.io);
             }
         });
-
-        this.startStatsBroadcaster();
-    }
-
-    private startStatsBroadcaster() {
-        if (this.statsInterval) clearInterval(this.statsInterval);
-        
-        this.statsInterval = setInterval(async () => {
-            if (!this.io) return;
-            const rooms = this.io.of('/').adapter.rooms;
-            const serverIdsToPoll = new Set<string>();
-
-            for (const [roomName] of rooms.entries()) {
-                if (roomName.startsWith('server_')) {
-                    serverIdsToPoll.add(roomName.replace('server_', ''));
-                }
-            }
-
-            if (serverIdsToPoll.size === 0) return;
-
-            try {
-                const servers = await prisma.server.findMany({
-                    where: { id: { in: Array.from(serverIdsToPoll) }, status: { in: ['RUNNING', 'STARTING'] } }
-                });
-
-                for (const server of servers) {
-                    if (!server.lastKnownPid) continue;
-
-                    try {
-                        const stats = await pidusage(server.lastKnownPid);
-                        const uptimeMs = server.lastStartedAt ? Date.now() - new Date(server.lastStartedAt).getTime() : 0;
-                        
-                        this.io.to(`server_${server.id}`).emit('serverStats', {
-                            serverId: server.id,
-                            cpu: stats.cpu,
-                            memory: stats.memory,
-                            uptimeMs
-                        });
-                    } catch (e) {
-                        // pidusage might fail if process died
-                    }
-                }
-            } catch (e) {
-                console.error("[WS] Error in stats broadcaster:", e);
-            }
-        }, 3000);
+        // Live metrics + status reconciliation are owned by MetricsStreamer (single loop).
     }
 
     public emitServerStatus(serverId: string, status: string) {
@@ -117,6 +76,14 @@ export class WebSocketService {
             this.io.emit('serverStatus', { serverId, status });
         }
     }
+}
+
+/** Constant-time string comparison to avoid token timing leaks. */
+export function timingSafeEqual(a: string, b: string): boolean {
+    if (a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
 }
 
 export const wsService = new WebSocketService();

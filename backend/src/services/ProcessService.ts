@@ -1,72 +1,104 @@
 import { wsService } from './WebSocketService';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import path from 'path';
 import fs from 'fs';
+import { config } from '../config';
+import { run, runOk } from '../utils/exec';
+import { stripAnsi } from '../utils/ansi';
 
-const execAsync = promisify(exec);
-
+/**
+ * Owns all interaction with tmux/OS processes. Every command is executed via argv
+ * arrays (no shell), so user-controlled values (console commands, player names)
+ * can never be interpreted as shell syntax.
+ */
 export class ProcessService {
-    
+
     private getSessionName(id: string) {
         return `ramscraft_${id.replace(/-/g, '_')}`;
     }
-    
+
     public getLogFilePath(id: string) {
-        const logDir = path.join(process.cwd(), 'logs');
+        const logDir = config.logsDir;
         if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
         return path.join(logDir, `${this.getSessionName(id)}.log`);
     }
 
     public async hasSession(id: string): Promise<boolean> {
-        try {
-            await execAsync(`tmux has-session -t ${this.getSessionName(id)}`);
-            return true;
-        } catch {
-            return false;
-        }
+        return runOk('tmux', ['has-session', '-t', this.getSessionName(id)]);
     }
 
     public async getSessionPid(id: string): Promise<number | null> {
         try {
-            const { stdout } = await execAsync(`tmux list-panes -t ${this.getSessionName(id)} -F "#{pane_pid}"`);
-            const pid = parseInt(stdout.trim(), 10);
+            const { stdout, code } = await run('tmux', ['list-panes', '-t', this.getSessionName(id), '-F', '#{pane_pid}']);
+            if (code !== 0) return null;
+            const pid = parseInt(stdout.trim().split('\n')[0], 10);
             return isNaN(pid) ? null : pid;
         } catch {
             return null;
         }
     }
 
-    public async isJavaProcess(pid: number): Promise<boolean> {
+    /** The full command line of a pid, or null if it does not exist. */
+    private async getProcessCmdline(pid: number): Promise<string | null> {
         try {
-            const { stdout } = await execAsync(`ps -p ${pid} -o command=`);
-            // Check for java or our fake test bash script
-            return stdout.includes('java') || stdout.includes('bash') || stdout.includes('node');
+            const cmdlinePath = `/proc/${pid}/cmdline`;
+            if (fs.existsSync(cmdlinePath)) {
+                return fs.readFileSync(cmdlinePath, 'utf8').replace(/\0/g, ' ').trim();
+            }
+            const { stdout, code } = await run('ps', ['-p', String(pid), '-o', 'args=']);
+            return code === 0 ? stdout.trim() : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /** The working directory of a pid via /proc, or null. */
+    private getProcessCwd(pid: number): string | null {
+        try {
+            return fs.realpathSync(`/proc/${pid}/cwd`);
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Strong identity check: is `pid` actually THIS server's JVM? We require a live
+     * java process whose working directory is the server's own directory. This
+     * defeats (a) PID reuse after a crash/reboot and (b) another service answering
+     * on the same TCP port. A bare pid or a port ping is never trusted alone.
+     */
+    public async isServerProcess(pid: number | null, serverDir: string): Promise<boolean> {
+        if (!pid || pid <= 1) return false;
+        const cmd = await this.getProcessCmdline(pid);
+        if (!cmd || !/\bjava\b/.test(cmd)) return false;
+        const cwd = this.getProcessCwd(pid);
+        if (!cwd) return false;
+        try {
+            return fs.realpathSync(cwd) === fs.realpathSync(serverDir);
         } catch {
             return false;
         }
     }
 
-    public async startServer(id: string, startCommand: string, directory: string): Promise<void> {
+    public async startServer(id: string, javaPath: string, args: string[], directory: string): Promise<void> {
         const sessionName = this.getSessionName(id);
-        const exists = await this.hasSession(id);
-        if (exists) throw new Error('Session already exists');
+        if (await this.hasSession(id)) throw new Error('Server session already exists');
 
-        // Spawn detached tmux session
-        const cmd = `tmux new-session -d -s ${sessionName} -c "${directory}" "${startCommand}"`;
-        await execAsync(cmd);
-        
-        // Pipe pane output to log file for persistent console
+        // Detached tmux session; command is passed as argv (no shell interpolation).
+        const res = await run('tmux', ['new-session', '-d', '-s', sessionName, '-c', directory, javaPath, ...args]);
+        if (res.code !== 0) {
+            throw new Error(`Failed to start tmux session: ${res.stderr || res.stdout}`.trim());
+        }
+
+        // Persist console output. The log path is app-controlled (no user input).
         const logPath = this.getLogFilePath(id);
-        await execAsync(`tmux pipe-pane -o -t ${sessionName} "cat >> ${logPath}"`);
-        
+        await run('tmux', ['pipe-pane', '-o', '-t', sessionName, `cat >> '${logPath.replace(/'/g, "'\\''")}'`]);
+
         const pid = await this.getSessionPid(id);
-        
         await prisma.server.update({
             where: { id },
-            data: { 
+            data: {
                 status: ServerStatus.STARTING,
                 tmuxSessionName: sessionName,
                 lastKnownPid: pid,
@@ -78,7 +110,13 @@ export class ProcessService {
 
     public async sendCommand(id: string, command: string): Promise<void> {
         if (!(await this.hasSession(id))) throw new Error('Server is not running');
-        await execAsync(`tmux send-keys -t ${this.getSessionName(id)} "${command.replace(/"/g, '\\"')}" C-m`);
+        // Console commands are single-line; strip newlines so a value cannot inject
+        // extra console lines. No shell is involved (argv), so shell metachars are inert.
+        const line = command.replace(/[\r\n]+/g, ' ');
+        const sessionName = this.getSessionName(id);
+        // -l sends the text literally (no tmux key-name interpretation), then Enter.
+        await run('tmux', ['send-keys', '-t', sessionName, '-l', '--', line]);
+        await run('tmux', ['send-keys', '-t', sessionName, 'Enter']);
     }
 
     public async stopServer(id: string, timeoutMs: number = 60000): Promise<void> {
@@ -86,50 +124,49 @@ export class ProcessService {
         wsService.emitServerStatus(id, ServerStatus.STOPPING);
 
         if (await this.hasSession(id)) {
-            await this.sendCommand(id, 'stop');
-            
+            try { await this.sendCommand(id, 'stop'); } catch { /* fall through to kill */ }
+
             const start = Date.now();
             while (await this.hasSession(id)) {
                 if (Date.now() - start > timeoutMs) {
-                    await this.forceKill(id);
+                    await this.killSession(id);
                     break;
                 }
                 await new Promise(r => setTimeout(r, 1000));
             }
         }
-        
-        await prisma.server.update({ 
-            where: { id }, 
-            data: { status: ServerStatus.OFFLINE, tmuxSessionName: null, lastKnownPid: null } 
+
+        await prisma.server.update({
+            where: { id },
+            data: { status: ServerStatus.OFFLINE, tmuxSessionName: null, lastKnownPid: null, lastStoppedAt: new Date() }
         });
         wsService.emitServerStatus(id, ServerStatus.OFFLINE);
     }
 
-    public async forceKill(id: string): Promise<void> {
-        try {
-            await execAsync(`tmux kill-session -t ${this.getSessionName(id)}`);
-        } catch (e) {
-            // Ignore if already dead
-        }
-        await prisma.server.update({ 
-            where: { id }, 
-            data: { status: ServerStatus.CRASHED, tmuxSessionName: null, lastKnownPid: null } 
+    /** Kill the tmux session (and thus the JVM child) without touching the DB status. */
+    public async killSession(id: string): Promise<void> {
+        await runOk('tmux', ['kill-session', '-t', this.getSessionName(id)]);
+    }
+
+    public async forceKill(id: string, finalStatus: ServerStatus = ServerStatus.CRASHED): Promise<void> {
+        await this.killSession(id);
+        await prisma.server.update({
+            where: { id },
+            data: { status: finalStatus, tmuxSessionName: null, lastKnownPid: null }
         });
-        wsService.emitServerStatus(id, ServerStatus.CRASHED);
+        wsService.emitServerStatus(id, finalStatus);
     }
 
     public async getConsoleHistory(id: string, lines: number = 1000): Promise<string> {
         const logPath = this.getLogFilePath(id);
-        if (fs.existsSync(logPath)) {
-            // Very basic tailing of the file for history
-            try {
-                const { stdout } = await execAsync(`tail -n ${lines} ${logPath}`);
-                return stdout;
-            } catch {
-                return '';
-            }
+        if (!fs.existsSync(logPath)) return '';
+        try {
+            const content = fs.readFileSync(logPath, 'utf8');
+            const tail = content.split('\n').slice(-lines).join('\n');
+            return stripAnsi(tail);
+        } catch {
+            return '';
         }
-        return '';
     }
 }
 

@@ -52,7 +52,7 @@ export const ServerOverview = () => {
     const [stats, setStats] = useState<{cpu: number, memory: number, uptimeMs: number} | null>(null);
 
     useEffect(() => {
-        if (!server || (server.status !== 'RUNNING' && server.status !== 'STARTING')) {
+        if (!server || (server.status !== 'ONLINE' && server.status !== 'STARTING')) {
             setStats(null);
             return;
         }
@@ -205,7 +205,7 @@ export const ServerOverview = () => {
                         <div className="pt-2 border-t border-white/[0.04]">
                             <div className="flex justify-between text-sm py-2">
                                 <span className="text-slate-400 flex items-center gap-2"><Users size={14} /> Players</span>
-                                <span className="text-white font-semibold">0 / 20</span>
+                                <span className="text-white font-semibold">See Players tab</span>
                             </div>
                             <div className="flex justify-between text-sm py-2">
                                 <span className="text-slate-400 flex items-center gap-2"><Clock size={14} /> Uptime</span>

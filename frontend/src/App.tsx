@@ -14,8 +14,10 @@ import { Worlds } from './pages/server/Worlds';
 import { Software } from './pages/server/Software';
 import { io } from 'socket.io-client';
 import { useServersStore } from './store/useServersStore';
+import { getToken } from './api';
 
-export const socket = io({ autoConnect: false });
+// Pass the optional access token on the WebSocket handshake (see api.ts).
+export const socket = io({ autoConnect: false, auth: (cb) => cb({ token: getToken() || undefined }) });
 
 function App() {
     const updateServerStatus = useServersStore(s => s.updateServerStatus);

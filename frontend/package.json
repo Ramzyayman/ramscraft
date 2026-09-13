@@ -1,6 +1,9 @@
 {
   "name": "@ramscraft/frontend",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=20.19"
+  },
   "dependencies": {
     "axios": "^1.20.0",
     "clsx": "^2.1.1",

@@ -1,8 +1,8 @@
-
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
 import { PrismaClient } from '@prisma/client';
+import { config, isLoopbackAddress } from './config';
 import serverRoutes from './routes/server.routes';
 import hostRoutes from './routes/host.routes';
 import softwareRoutes from './routes/software.routes';
@@ -15,40 +15,47 @@ import { ReconciliationService } from './services/ReconciliationService';
 import { wsService } from './services/WebSocketService';
 import { MetricsStreamer } from './services/MetricsStreamer';
 import { JavaDiscoveryService } from './services/JavaDiscoveryService';
+import { authGuard, rateLimit } from './middleware/auth';
 
 export const prisma = new PrismaClient();
 const app = express();
-const PORT = process.env.PORT || 3001;
+app.set('trust proxy', true); // behind nginx/RamsesHub; makes req.ip meaningful
 
-app.use(cors());
-app.use(express.json());
+// Basic security headers (no external dep).
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+});
 
-// REST Routes
+// Same-origin by default; cross-origin only for explicitly allowed origins.
+app.use(cors({ origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : false }));
+app.use(express.json({ limit: '2mb' }));
+
+// Every management API call is authenticated + rate-limited.
+app.use('/api', rateLimit(240), authGuard);
+
 app.use('/api/servers', serverRoutes);
 app.use('/api/host', hostRoutes);
 app.use('/api/software', softwareRoutes);
-
-// File, Setting, Backup, Player routes
 app.use('/api/servers', filesRoutes);
 app.use('/api/servers', settingsRoutes);
 app.use('/api/servers', backupsRoutes);
 app.use('/api/servers', playersRoutes);
 app.use('/api/servers', worldsRoutes);
 
-// Serve Frontend
+// Serve the built frontend.
 const frontendDist = require('path').join(process.cwd(), '..', 'frontend', 'dist');
 app.use(express.static(frontendDist));
-
-// Catch-all route to serve the frontend for any non-API routes, or return 404 for API routes
-app.use((req, res, next) => {
+app.use((req, res) => {
     if (!req.path.startsWith('/api')) {
         res.sendFile(require('path').join(frontendDist, 'index.html'));
     } else {
-        res.status(404).json({error: 'API Route Not Found'});
+        res.status(404).json({ error: 'API Route Not Found' });
     }
 });
 
-// Global error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error(err.stack);
     res.status(500).json({ error: 'Internal Server Error', message: err.message });
@@ -56,9 +63,18 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 async function bootstrap() {
     try {
+        // Fail closed: never expose the API on a network interface without a token.
+        if (!isLoopbackAddress(config.host) && config.host !== 'localhost' && !config.apiToken) {
+            console.error(
+                `Refusing to bind to ${config.host} without RAMSCRAFT_API_TOKEN set. ` +
+                `Set a token to expose on the network, or bind to 127.0.0.1 (default) behind a proxy.`
+            );
+            process.exit(1);
+        }
+
         await prisma.$connect();
         console.log('Connected to SQLite Database.');
-        
+
         const javaDiscovery = new JavaDiscoveryService();
         await javaDiscovery.discoverInstalledRuntimes();
 
@@ -70,8 +86,11 @@ async function bootstrap() {
         const metricsStreamer = new MetricsStreamer(wsService.io);
         metricsStreamer.start();
 
-        server.listen(Number(PORT), '0.0.0.0', () => {
-            console.log(`RamsCraft Backend listening on http://0.0.0.0:${PORT}`);
+        server.listen(config.port, config.host, () => {
+            console.log(`RamsCraft Backend listening on http://${config.host}:${config.port}`);
+            if (!config.apiToken && isLoopbackAddress(config.host)) {
+                console.log('[auth] Loopback-only mode (no token). Front with nginx/RamsesHub or set RAMSCRAFT_API_TOKEN for remote access.');
+            }
         });
     } catch (error) {
         console.error('Failed to start RamsCraft:', error);

@@ -1,84 +1,67 @@
-import { wsService } from './WebSocketService';
 import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import { processService } from './ProcessService';
-import net from 'net';
+import { pingMinecraft } from '../utils/mcping';
+import { serverRoot } from '../utils/paths';
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * On boot, converge the DB with reality. Status is derived from a VERIFIED process
+ * (tmux session + a JVM whose cwd is this server's directory) — never from a bare
+ * stored PID (PID reuse) or a TCP port that another service might answer.
+ */
 export class ReconciliationService {
-    
-    private async pingServer(port: number): Promise<boolean> {
-        return new Promise((resolve) => {
-            const socket = new net.Socket();
-            socket.setTimeout(2000);
-            socket.on('connect', () => { socket.destroy(); resolve(true); });
-            socket.on('timeout', () => { socket.destroy(); resolve(false); });
-            socket.on('error', () => { socket.destroy(); resolve(false); });
-            socket.connect(port, '127.0.0.1');
-        });
-    }
 
     public async reconcileOnStartup(): Promise<void> {
         console.log('[Reconciliation] Starting full state reconciliation...');
-        
         const servers = await prisma.server.findMany();
-        
+
         for (const server of servers) {
-            let nextStatus = ServerStatus.OFFLINE;
+            let dir: string;
+            try {
+                dir = serverRoot(server.directoryName);
+            } catch {
+                continue;
+            }
 
-            // 1. Check if tmux session exists
-            const hasSession = await processService.hasSession(server.id);
-            
-            if (hasSession) {
-                // 2. Verify it is a valid Java process
-                const pid = await processService.getSessionPid(server.id);
-                if (pid && await processService.isJavaProcess(pid)) {
-                    // 3. Process is alive. Check if Minecraft is accepting connections (ONLINE vs STARTING)
-                    const isOnline = await this.pingServer(server.port);
-                    nextStatus = isOnline ? ServerStatus.ONLINE : ServerStatus.STARTING;
+            let nextStatus: ServerStatus = ServerStatus.OFFLINE;
+            let pid: number | null = null;
+
+            if (await processService.hasSession(server.id)) {
+                pid = await processService.getSessionPid(server.id);
+                if (await processService.isServerProcess(pid, dir)) {
+                    // Verified our JVM is alive. ONLINE only if it also answers the
+                    // Minecraft protocol; otherwise it is still starting.
+                    const online = await pingMinecraft('127.0.0.1', server.port);
+                    nextStatus = online ? ServerStatus.ONLINE : ServerStatus.STARTING;
                 } else {
-                    // Tmux exists but process inside is dead/hijacked. Kill the stale session.
-                    console.warn(`[Reconciliation] Stale/Dead tmux session found for ${server.name}. Cleaning up.`);
-                    await processService.forceKill(server.id);
-                }
-            } else if (server.lastKnownPid) {
-                // Check if the process survived outside of tmux (Orphan)
-                const isJava = await processService.isJavaProcess(server.lastKnownPid);
-                if (isJava) {
-                    console.warn(`[Reconciliation] Orphaned Java process ${server.lastKnownPid} found for ${server.name}. Force killing as it lost its console.`);
-                    try {
-                        process.kill(server.lastKnownPid, 'SIGKILL');
-                    } catch (e) {}
+                    // Session exists but the process is not ours (stale/hijacked/reused).
+                    console.warn(`[Reconciliation] Stale session for ${server.name}; cleaning up.`);
+                    await processService.killSession(server.id);
+                    nextStatus = ServerStatus.OFFLINE;
+                    pid = null;
                 }
             }
+            // No session => OFFLINE. We deliberately do NOT signal any stored PID:
+            // after a crash/reboot that PID may belong to an unrelated process.
 
-            // 4. Check EULA File sync
-            const serverRoot = path.join(process.cwd(), '..', 'servers', server.directoryName);
-            const eulaPath = path.join(serverRoot, 'eula.txt');
+            // EULA file sync (unchanged behaviour).
             let eulaAccepted = false;
-            
+            const eulaPath = path.join(dir, 'eula.txt');
             if (fs.existsSync(eulaPath)) {
-                const eulaContent = fs.readFileSync(eulaPath, 'utf8');
-                eulaAccepted = eulaContent.includes('eula=true');
+                eulaAccepted = fs.readFileSync(eulaPath, 'utf8').includes('eula=true');
             }
 
-            if (nextStatus === ServerStatus.OFFLINE && !eulaAccepted) {
-                // If it's offline and eula is not accepted, prompt it
-                // Wait, if it has never been started, maybe it's just OFFLINE.
-                // We'll trust the user command to start it to set EULA_PENDING.
-            }
-
-            // Update Database
             await prisma.server.update({
                 where: { id: server.id },
                 data: {
                     status: nextStatus,
                     eulaAccepted,
-                    tmuxSessionName: nextStatus !== ServerStatus.OFFLINE ? `ramscraft_${server.id.replace(/-/g, '_')}` : null
+                    tmuxSessionName: nextStatus !== ServerStatus.OFFLINE ? `ramscraft_${server.id.replace(/-/g, '_')}` : null,
+                    lastKnownPid: nextStatus !== ServerStatus.OFFLINE ? pid : null
                 }
             });
-            
             console.log(`[Reconciliation] ${server.name} reconciled to ${nextStatus}`);
         }
     }

@@ -2,13 +2,13 @@ import { Router } from 'express';
 import { prisma } from '../index';
 import fs from 'fs';
 import path from 'path';
-import { processService } from '../services/ProcessService';
+import { serverRoot } from '../utils/paths';
 
 const router = Router();
 
 router.get('/:id/settings', async (req, res) => {
     try {
-        const server = await prisma.server.findUnique({where:{id: req.params.id}}); if(!server) return res.status(404).json({error:'Not found'}); const serverDir = require('path').join(process.cwd(), '..', 'servers', server.directoryName);
+        const server = await prisma.server.findUnique({where:{id: req.params.id}}); if(!server) return res.status(404).json({error:'Not found'}); const serverDir = serverRoot(server.directoryName);
         const propPath = path.join(serverDir, 'server.properties');
         if (!fs.existsSync(propPath)) {
             return res.json({});
@@ -36,7 +36,17 @@ router.get('/:id/settings', async (req, res) => {
 router.patch('/:id/settings', async (req, res) => {
     try {
         const updates = req.body;
-        const server = await prisma.server.findUnique({where:{id: req.params.id}}); if(!server) return res.status(404).json({error:'Not found'}); const serverDir = require('path').join(process.cwd(), '..', 'servers', server.directoryName);
+        if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+            return res.status(400).json({ error: 'Invalid settings payload' });
+        }
+        // server.properties keys are simple; reject anything that could inject newlines
+        // or break the key=value format.
+        for (const [k, v] of Object.entries(updates)) {
+            if (!/^[A-Za-z0-9._-]+$/.test(k) || /[\r\n]/.test(String(v))) {
+                return res.status(400).json({ error: `Invalid property: ${k}` });
+            }
+        }
+        const server = await prisma.server.findUnique({where:{id: req.params.id}}); if(!server) return res.status(404).json({error:'Not found'}); const serverDir = serverRoot(server.directoryName);
         const propPath = path.join(serverDir, 'server.properties');
         
         let lines: string[] = [];

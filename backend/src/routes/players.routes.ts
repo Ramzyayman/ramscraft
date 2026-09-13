@@ -28,12 +28,21 @@ router.get('/:id/players', async (req, res) => {
     }
 });
 
+// Allowed player-management commands (maps UI action -> Minecraft command).
+const ALLOWED_COMMANDS = new Set(['kick', 'ban', 'pardon', 'op', 'deop', 'whitelist add', 'whitelist remove']);
+
 router.post('/:id/players/command', async (req, res) => {
     try {
         const { command, player } = req.body;
-        // Basic proxy for kick, ban, op
-        const fullCmd = `${command} ${player}`;
-        await processService.sendCommand(req.params.id, fullCmd);
+        // Command must be from the fixed allow-list; player must be a valid MC username.
+        // (Even so, sendCommand uses argv/no-shell, so this is defence in depth.)
+        if (typeof command !== 'string' || !ALLOWED_COMMANDS.has(command)) {
+            return res.status(400).json({ error: 'Unsupported command' });
+        }
+        if (typeof player !== 'string' || !/^[A-Za-z0-9_]{1,16}$/.test(player)) {
+            return res.status(400).json({ error: 'Invalid player name' });
+        }
+        await processService.sendCommand(req.params.id, `${command} ${player}`);
         res.json({ success: true });
     } catch (e: any) {
         res.status(500).json({ error: e.message });

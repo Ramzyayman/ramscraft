@@ -3,6 +3,8 @@ import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import { processService } from '../services/ProcessService';
 import { providerRegistry } from '../providers/ProviderRegistry';
+import { selectJavaRuntime } from '../utils/java';
+import { serverRoot } from '../utils/paths';
 import fs from 'fs';
 import path from 'path';
 
@@ -19,7 +21,7 @@ export class LifecycleController {
                 return res.status(400).json({ error: 'Server must be OFFLINE to start.' });
             }
 
-            const serverDir = path.join(process.cwd(), '..', 'servers', server.directoryName);
+            const serverDir = serverRoot(server.directoryName);
             if (!fs.existsSync(serverDir)) fs.mkdirSync(serverDir, { recursive: true });
 
             // EULA check
@@ -36,41 +38,24 @@ export class LifecycleController {
             }
 
             if (!server.software) return res.status(400).json({ error: 'No software installed.' });
-            
+
+            const jarPath = path.join(serverDir, 'server.jar');
+            if (!fs.existsSync(jarPath)) {
+                return res.status(400).json({ error: 'Server jar is missing. Re-install the software before starting.' });
+            }
+
             const provider = providerRegistry.get(server.software.provider);
-            const jarName = 'server.jar'; // Assume downloaded jar is named this for now
-            const args = provider.getStartupArgs(server.minRamMb, server.maxRamMb, jarName);
-            
-            // Java Compatibility Check & Auto-selection
-            const javaCompat = await provider.getJavaCompatibility(server.software.mcVersion, { id: server.software.releaseId, displayVersion: '', isStable: true });
-            let javaExecutable = 'java';
-            
-            let selectedRuntime = server.javaRuntime;
-            if (selectedRuntime && selectedRuntime.majorVersion < javaCompat.minVersion) {
-                selectedRuntime = null; // Configured runtime is invalid, we must find a valid one
+            const args = provider.getStartupArgs(server.minRamMb, server.maxRamMb, 'server.jar');
+
+            // Select a compatible, installed Java runtime (honours min AND max range).
+            let selected;
+            try {
+                selected = await selectJavaRuntime(server.software.mcVersion, server.javaRuntimeId);
+            } catch (e: any) {
+                return res.status(400).json({ error: e.message });
             }
 
-            if (!selectedRuntime) {
-                // Auto-detect a compatible runtime
-                const compatibleRuntimes = await prisma.javaRuntime.findMany({
-                    where: { majorVersion: { gte: javaCompat.minVersion } },
-                    orderBy: { majorVersion: 'asc' }
-                });
-                if (compatibleRuntimes.length > 0) {
-                    selectedRuntime = compatibleRuntimes[0];
-                }
-            }
-
-            if (!selectedRuntime) {
-                return res.status(400).json({ 
-                    error: `Minecraft ${server.software.mcVersion} requires Java ${javaCompat.minVersion} or newer, but it is not installed on the system. Please install it and restart the RamsCraft backend to detect it.` 
-                });
-            }
-
-            javaExecutable = selectedRuntime.path;
-            const cmd = `${javaExecutable} ${args.join(' ')}`;
-
-            await processService.startServer(server.id, cmd, serverDir);
+            await processService.startServer(server.id, selected.path, args, serverDir);
             res.json({ success: true, status: ServerStatus.STARTING });
         } catch (error: any) {
             res.status(500).json({ error: error.message });

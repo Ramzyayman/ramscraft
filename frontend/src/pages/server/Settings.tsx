@@ -176,7 +176,7 @@ export const Settings = () => {
                         </h3>
                         <p className="text-sm text-slate-400 mt-1">Changes are written to server.properties.</p>
                     </div>
-                    <Link to={`/servers/${id}/files?path=/server.properties`} className="glass-button px-4 py-2 text-sm text-slate-300 hover:text-white">
+                    <Link to={`/server/${id}/files`} className="glass-button px-4 py-2 text-sm text-slate-300 hover:text-white">
                         Advanced Configuration
                     </Link>
                 </div>

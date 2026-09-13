@@ -1,4 +1,4 @@
-import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility } from './ISoftwareProvider';
+import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility, IDownloadInfo } from './ISoftwareProvider';
 import { cacheService } from '../services/MetadataCacheService';
 import { JavaVersionHelper } from './JavaVersionHelper';
 
@@ -50,20 +50,21 @@ export class PaperProvider implements ISoftwareProvider {
         return JavaVersionHelper.getStandardJavaRules(mcVersion);
     }
 
-    async getDownloadInfo(mcVersion: string, release: ISoftwareRelease): Promise<{ url: string, checksum?: string }> {
+    async getDownloadInfo(mcVersion: string, release: ISoftwareRelease): Promise<IDownloadInfo> {
         const response = await fetch(`${this.BASE_URL}/versions/${mcVersion}/builds`);
         if (!response.ok) throw new Error('Failed to fetch build checksum');
         const data = await response.json();
-        
+
         const build = data.find((b: any) => b.id.toString() === release.id);
         if (!build || !build.downloads || !build.downloads['server:default']) {
             throw new Error('Build download not found');
         }
 
         const downloadInfo = build.downloads['server:default'];
-        return { 
-            url: downloadInfo.url, 
-            checksum: downloadInfo.checksums?.sha256 
+        return {
+            url: downloadInfo.url,
+            checksum: downloadInfo.checksums?.sha256,
+            checksumAlgo: 'sha256'
         };
     }
 

@@ -2,12 +2,18 @@ import { create } from 'zustand';
 import axios from 'axios';
 import { ServerStatus } from '@ramscraft/shared';
 
+export interface ServerSoftware {
+    provider: string;
+    mcVersion: string;
+    releaseId: string;
+}
+
 export interface Server {
     id: string;
     name: string;
     status: ServerStatus;
-    minecraftVersion: string;
-    software: string;
+    software?: ServerSoftware | null;
+    javaRuntimeId?: string | null;
     port: number;
     publicAddress?: string;
     minRamMb: number;

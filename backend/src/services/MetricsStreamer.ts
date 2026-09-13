@@ -2,14 +2,27 @@ import { Server } from 'socket.io';
 import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import { processService } from './ProcessService';
+import { pingMinecraft } from '../utils/mcping';
+import { serverRoot } from '../utils/paths';
 import pidusage from 'pidusage';
 import os from 'os';
-import net from 'net';
 import { wsService } from './WebSocketService';
 
+/**
+ * Single authoritative loop for status reconciliation AND live metrics. Replaces
+ * the previous two overlapping intervals (one of which filtered on the
+ * non-existent status "RUNNING", so live metrics never reached the UI).
+ *
+ * Every tick, for each STARTING/ONLINE server it:
+ *   - confirms the tmux session + our JVM (cwd match) are alive -> else CRASHED;
+ *   - promotes STARTING -> ONLINE once the MC protocol answers;
+ *   - emits `serverStats` (cpu/mem/uptime) to viewers of ONLINE/STARTING servers.
+ * It also emits host metrics to the `host` room.
+ */
 export class MetricsStreamer {
     private io: Server;
-    private timer: NodeJS.Timer | null = null;
+    private timer: NodeJS.Timeout | null = null;
+    private ticking = false;
 
     constructor(io: Server) {
         this.io = io;
@@ -17,111 +30,95 @@ export class MetricsStreamer {
 
     public start() {
         if (this.timer) return;
-        this.timer = setInterval(() => {
-            this.broadcastHostMetrics();
-            this.broadcastServerMetrics();
-            this.checkStartingServers();
-        }, 2000);
+        this.timer = setInterval(() => { void this.tick(); }, 2000);
     }
 
     public stop() {
-        if (this.timer) clearInterval(this.timer as any);
+        if (this.timer) clearInterval(this.timer);
         this.timer = null;
     }
 
-    
-    private async pingServer(port: number): Promise<boolean> {
-        return new Promise((resolve) => {
-            const socket = new net.Socket();
-            socket.setTimeout(2000);
-            socket.on('connect', () => { socket.destroy(); resolve(true); });
-            socket.on('timeout', () => { socket.destroy(); resolve(false); });
-            socket.on('error', () => { socket.destroy(); resolve(false); });
-            socket.connect(port, '127.0.0.1');
-        });
+    private async tick() {
+        if (this.ticking) return; // prevent overlap if a tick runs long
+        this.ticking = true;
+        try {
+            this.broadcastHostMetrics();
+            await this.reconcileActive();
+        } catch (e) {
+            console.error('[Status] tick error', e);
+        } finally {
+            this.ticking = false;
+        }
     }
 
-    private async checkStartingServers() {
-        try {
-            const startingServers = await prisma.server.findMany({
-                where: { status: ServerStatus.STARTING }
-            });
-            for (const server of startingServers) {
-                const hasSession = await processService.hasSession(server.id);
-                if (!hasSession) {
-                    await prisma.server.update({ where: { id: server.id }, data: { status: ServerStatus.OFFLINE } });
-                    wsService.emitServerStatus(server.id, ServerStatus.OFFLINE);
-                    console.log(`[MetricsStreamer] Server ${server.id} crashed during startup.`);
-                    continue;
-                }
+    private roomSize(name: string): number {
+        return this.io.sockets.adapter.rooms.get(name)?.size ?? 0;
+    }
 
-                const isOnline = await this.pingServer(server.port);
-                if (isOnline) {
+    private async reconcileActive() {
+        const active = await prisma.server.findMany({
+            where: { status: { in: [ServerStatus.STARTING, ServerStatus.ONLINE] } }
+        });
+
+        for (const server of active) {
+            let dir: string;
+            try { dir = serverRoot(server.directoryName); } catch { continue; }
+
+            const hasSession = await processService.hasSession(server.id);
+            const pid = hasSession ? await processService.getSessionPid(server.id) : null;
+            const alive = hasSession && await processService.isServerProcess(pid, dir);
+
+            if (!alive) {
+                // Session gone or process is not ours: the server has crashed.
+                await prisma.server.update({
+                    where: { id: server.id },
+                    data: { status: ServerStatus.CRASHED, tmuxSessionName: null, lastKnownPid: null }
+                });
+                wsService.emitServerStatus(server.id, ServerStatus.CRASHED);
+                if (hasSession) await processService.killSession(server.id);
+                console.log(`[Status] ${server.name} crashed (process gone).`);
+                continue;
+            }
+
+            // Keep the verified pane pid current (defeats stale pid metrics after restart).
+            if (pid && pid !== server.lastKnownPid) {
+                await prisma.server.update({ where: { id: server.id }, data: { lastKnownPid: pid } });
+            }
+
+            if (server.status === ServerStatus.STARTING) {
+                if (await pingMinecraft('127.0.0.1', server.port)) {
                     await prisma.server.update({ where: { id: server.id }, data: { status: ServerStatus.ONLINE } });
                     wsService.emitServerStatus(server.id, ServerStatus.ONLINE);
-                    console.log(`[MetricsStreamer] Server ${server.id} reached ONLINE state.`);
+                    console.log(`[Status] ${server.name} is ONLINE.`);
                 }
             }
-        } catch (e) {}
+
+            // Emit live stats to anyone viewing this server.
+            const effectivePid = pid ?? server.lastKnownPid;
+            if (effectivePid && this.roomSize(`server_${server.id}`) > 0) {
+                try {
+                    const stats = await pidusage(effectivePid);
+                    const uptimeMs = server.lastStartedAt ? Date.now() - new Date(server.lastStartedAt).getTime() : 0;
+                    this.io.to(`server_${server.id}`).emit('serverStats', {
+                        serverId: server.id,
+                        cpu: stats.cpu,
+                        memory: stats.memory,
+                        uptimeMs
+                    });
+                } catch { /* process may have just exited; next tick reconciles */ }
+            }
+        }
     }
 
-    private async broadcastHostMetrics() {
-        const room = this.io.sockets.adapter.rooms.get('host');
-        if (!room || room.size === 0) return; // Nobody listening
-
+    private broadcastHostMetrics() {
+        if (this.roomSize('host') === 0) return;
         const totalMem = os.totalmem();
         const freeMem = os.freemem();
-        const usedMem = totalMem - freeMem;
-        
-        const hostMetrics = {
-            cpuUsage: os.loadavg()[0], // 1 minute load avg
-            memUsedMb: Math.round(usedMem / 1024 / 1024),
+        this.io.to('host').emit('hostMetrics', {
+            cpuUsage: os.loadavg()[0],
+            memUsedMb: Math.round((totalMem - freeMem) / 1024 / 1024),
             memTotalMb: Math.round(totalMem / 1024 / 1024),
             uptimeSec: os.uptime()
-        };
-
-        this.io.to('host').emit('hostMetrics', hostMetrics);
-    }
-
-    private async broadcastServerMetrics() {
-        // Find all servers that currently have clients listening
-        const rooms = this.io.sockets.adapter.rooms;
-        
-        // Optimize: Only fetch from DB if there are any active server rooms
-        let hasActiveServerRooms = false;
-        for (const [roomName] of rooms.entries()) {
-            if (roomName.startsWith('server_')) {
-                hasActiveServerRooms = true;
-                break;
-            }
-        }
-        if (!hasActiveServerRooms) return;
-
-        try {
-            const onlineServers = await prisma.server.findMany({
-                where: { status: ServerStatus.ONLINE }
-            });
-
-            for (const server of onlineServers) {
-                const roomName = `server_${server.id}`;
-                const room = rooms.get(roomName);
-                if (!room || room.size === 0) continue; // Skip if nobody is viewing this server
-
-                if (server.lastKnownPid) {
-                    try {
-                        const stats = await pidusage(server.lastKnownPid);
-                        this.io.to(roomName).emit('serverMetrics', {
-                            serverId: server.id,
-                            cpuPercent: stats.cpu,
-                            memUsedMb: Math.round(stats.memory / 1024 / 1024)
-                        });
-                    } catch (e) {
-                        // PID might have died but hasn't reconciled yet
-                    }
-                }
-            }
-        } catch (e) {
-            console.error('[MetricsStreamer] Error broadcasting server metrics', e);
-        }
+        });
     }
 }

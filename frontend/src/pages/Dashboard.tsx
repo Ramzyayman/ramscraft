@@ -72,16 +72,12 @@ export const Dashboard = () => {
                             
                             <div className="grid grid-cols-2 bg-black/20 border-t border-white/[0.04]">
                                 <div className="p-2.5 text-center border-r border-white/[0.04]">
-                                    <div className="text-sm font-semibold text-slate-200 mb-0.5">
-                                        {server.status === 'ONLINE' ? '12%' : '-'}
-                                    </div>
+                                    <div className="text-sm font-semibold text-slate-200 mb-0.5">—</div>
                                     <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">CPU</div>
                                 </div>
                                 <div className="p-2.5 text-center">
-                                    <div className="text-sm font-semibold text-slate-200 mb-0.5">
-                                        {server.status === 'ONLINE' ? '1.2GB' : '-'}
-                                    </div>
-                                    <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">RAM</div>
+                                    <div className="text-sm font-semibold text-slate-200 mb-0.5">{(server.maxRamMb / 1024).toFixed(1)}GB</div>
+                                    <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Max RAM</div>
                                 </div>
                             </div>
                         </Link>

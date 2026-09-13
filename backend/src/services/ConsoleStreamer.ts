@@ -1,6 +1,7 @@
 import { ChildProcess, spawn } from 'child_process';
 import { Server } from 'socket.io';
 import { processService } from './ProcessService';
+import { stripAnsi } from '../utils/ansi';
 import fs from 'fs';
 
 export class ConsoleStreamer {
@@ -22,7 +23,8 @@ export class ConsoleStreamer {
 
         tailProcess.stdout.on('data', (data: Buffer) => {
             const lines = data.toString().split('\n');
-            for (let line of lines) {
+            for (let raw of lines) {
+                const line = stripAnsi(raw);
                 if (line) {
                     io.to(`server_${serverId}`).emit('consoleLine', { serverId, line });
                 }
