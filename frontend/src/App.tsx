@@ -11,10 +11,11 @@ import { Players } from './pages/server/Players';
 import { Files } from './pages/server/Files';
 import { Backups } from './pages/server/Backups';
 import { Worlds } from './pages/server/Worlds';
+import { Software } from './pages/server/Software';
 import { io } from 'socket.io-client';
 import { useServersStore } from './store/useServersStore';
 
-export const socket = io('http://192.168.1.6:3001', { autoConnect: false });
+export const socket = io({ autoConnect: false });
 
 function App() {
     const updateServerStatus = useServersStore(s => s.updateServerStatus);
@@ -44,6 +45,7 @@ function App() {
                         <Route path="console" element={<ServerConsolePage />} />
                         <Route path="settings" element={<Settings />} />
                         <Route path="players" element={<Players />} />
+                        <Route path="software" element={<Software />} />
                         <Route path="files" element={<Files />} />
                         <Route path="worlds" element={<Worlds />} />
                         <Route path="backups" element={<Backups />} />

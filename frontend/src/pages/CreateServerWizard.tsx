@@ -17,14 +17,14 @@ export const CreateServerWizard = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        axios.get('http://192.168.1.6:3001/api/software/providers')
+        axios.get('/api/software/providers')
             .then(res => setProviders(res.data))
             .catch(e => console.error(e));
     }, []);
 
     useEffect(() => {
         if (software) {
-            axios.get(`http://192.168.1.6:3001/api/software/providers/${software}/versions`)
+            axios.get(`/api/software/providers/${software}/versions`)
                 .then(res => {
                     setVersions(res.data);
                     if (res.data.length > 0) setVersion(res.data[0].version);
@@ -37,7 +37,7 @@ export const CreateServerWizard = () => {
         e.preventDefault();
         setLoading(true);
         try {
-            const res = await axios.post('http://192.168.1.6:3001/api/servers', {
+            const res = await axios.post('/api/servers', {
                 name,
                 port: Number(port),
                 minRamMb: memory,
@@ -45,11 +45,11 @@ export const CreateServerWizard = () => {
             });
             
             // Now fetch releases for the chosen version
-            const relRes = await axios.get(`http://192.168.1.6:3001/api/software/providers/${software}/versions/${version}/releases`);
+            const relRes = await axios.get(`/api/software/providers/${software}/versions/${version}/releases`);
             const releaseId = relRes.data.length > 0 ? relRes.data[0].id : null;
             
             if (releaseId) {
-                await axios.post(`http://192.168.1.6:3001/api/servers/${res.data.id}/software/install`, {
+                await axios.post(`/api/servers/${res.data.id}/software/install`, {
                     providerId: software,
                     mcVersion: version,
                     releaseId: releaseId

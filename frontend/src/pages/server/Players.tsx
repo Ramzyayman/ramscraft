@@ -12,7 +12,7 @@ export const Players = () => {
 
     const fetchPlayers = async () => {
         try {
-            const res = await axios.get(`http://192.168.1.6:3001/api/servers/${id}/players`);
+            const res = await axios.get(`/api/servers/${id}/players`);
             setOnlineCount(res.data.online);
             setMaxCount(res.data.max);
             setPlayers(res.data.sample);
@@ -31,7 +31,7 @@ export const Players = () => {
 
     const executeCommand = async (command: string, player: string) => {
         try {
-            await axios.post(`http://192.168.1.6:3001/api/servers/${id}/players/command`, { command, player });
+            await axios.post(`/api/servers/${id}/players/command`, { command, player });
             // alert(`Executed ${command} on ${player}`);
         } catch (e) {
             console.error('Command failed');

@@ -9,7 +9,7 @@ export const Backups = () => {
 
     const fetchBackups = async () => {
         try {
-            const res = await axios.get(`http://192.168.1.6:3001/api/servers/${id}/backups`);
+            const res = await axios.get(`/api/servers/${id}/backups`);
             setBackups(res.data);
         } catch (e) {
             console.error(e);
@@ -20,7 +20,7 @@ export const Backups = () => {
 
     const handleCreate = async () => {
         try {
-            await axios.post(`http://192.168.1.6:3001/api/servers/${id}/backups`);
+            await axios.post(`/api/servers/${id}/backups`);
             // alert('Backup started in background!');
             setTimeout(fetchBackups, 2000);
         } catch (e) {
@@ -31,7 +31,7 @@ export const Backups = () => {
     const handleRestore = async (file: string) => {
         if (!confirm('RESTORE WARNING: This will DELETE all current files and replace them with this backup. The server MUST be offline. Continue?')) return;
         try {
-            await axios.post(`http://192.168.1.6:3001/api/servers/${id}/backups/${file}/restore`);
+            await axios.post(`/api/servers/${id}/backups/${file}/restore`);
             // alert('Restore started in background!');
         } catch (e: any) {
             console.error('Restore failed: ' + (e.response?.data?.error || e.message));
@@ -64,11 +64,13 @@ export const Backups = () => {
                         <tbody className="divide-y divide-white/[0.04]">
                             {backups.length === 0 ? (
                                 <tr>
-                                    <td colSpan={3} className="px-6 py-12 text-center flex flex-col items-center">
-                                        <div className="w-12 h-12 bg-black/40 rounded-full flex items-center justify-center mb-4 border border-white/5">
-                                            <Database size={20} className="text-slate-500" />
+                                    <td colSpan={3} className="px-6">
+                                        <div className="flex flex-col items-center justify-center py-12">
+                                            <div className="w-12 h-12 bg-black/40 rounded-full flex items-center justify-center mb-4 border border-white/5">
+                                                <Database size={20} className="text-slate-500" />
+                                            </div>
+                                            <p className="text-slate-400 font-medium">No backups found.</p>
                                         </div>
-                                        <p className="text-slate-400 font-medium">No backups found.</p>
                                     </td>
                                 </tr>
                             ) : backups.map((b, i) => (

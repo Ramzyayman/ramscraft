@@ -12,7 +12,7 @@ export const ServerOverview = () => {
 
     const handlePower = async (action: 'start' | 'stop') => {
         try {
-            await axios.post(`http://192.168.1.6:3001/api/servers/${id}/${action}`);
+            await axios.post(`/api/servers/${id}/${action}`);
         } catch (error) {
             console.error('Power action failed', error);
         }
@@ -49,15 +49,38 @@ export const ServerOverview = () => {
                     <div className="p-5 border-b border-white/[0.04] bg-white/[0.02]">
                         <h3 className="text-lg font-semibold text-white">Connection Details</h3>
                     </div>
-                    <div className="p-6 space-y-4">
+                    <div className="p-6 space-y-6">
                         <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Server Address</label>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block">Local Address</label>
                             <div className="flex items-center gap-2">
                                 <code className="bg-black/40 px-3 py-2 rounded border border-white/10 text-slate-200 font-mono text-sm flex-1">
-                                    play.ramscraft.net:{server.port}
+                                    {window.location.hostname}:{server.port}
                                 </code>
-                                <button className="glass-button px-4 py-2">Copy</button>
+                                <button 
+                                    onClick={() => navigator.clipboard.writeText(`${window.location.hostname}:${server.port}`)}
+                                    className="glass-button px-4 py-2"
+                                >Copy</button>
                             </div>
+                            <p className="text-xs text-slate-500 mt-2">Use this address to connect when on the same LAN or VPN.</p>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block">Public Connection</label>
+                            {server.publicAddress ? (
+                                <div className="flex items-center gap-2">
+                                    <code className="bg-blue-900/20 px-3 py-2 rounded border border-blue-500/20 text-blue-300 font-mono text-sm flex-1">
+                                        {server.publicAddress}
+                                    </code>
+                                    <button 
+                                        onClick={() => navigator.clipboard.writeText(server.publicAddress || '')}
+                                        className="glass-button bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20 px-4 py-2"
+                                    >Copy</button>
+                                </div>
+                            ) : (
+                                <div className="bg-black/20 border border-white/5 rounded p-3 flex items-center justify-between">
+                                    <span className="text-sm text-slate-400 italic">Not configured</span>
+                                    <span className="text-xs text-slate-500">Configure in Settings</span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

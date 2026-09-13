@@ -1,27 +1,48 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
-import { File, Folder, Trash, Upload, Search, CornerLeftUp } from 'lucide-react';
+import { File, Folder, Trash, Upload, Search, CornerLeftUp, Download, Edit2, Archive, Save, X, Plus } from 'lucide-react';
 
 export const Files = () => {
     const { id } = useParams();
     const [path, setPath] = useState('/');
     const [files, setFiles] = useState<any[]>([]);
+    
+    // Editor State
+    const [editingFile, setEditingFile] = useState<string | null>(null);
+    const [fileContent, setFileContent] = useState('');
+    const [saving, setSaving] = useState(false);
+    
+    // Upload refs
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const zipInputRef = useRef<HTMLInputElement>(null);
+    const folderInputRef = useRef<HTMLInputElement>(null);
 
     const fetchFiles = async () => {
         try {
-            const res = await axios.get(`http://192.168.1.6:3001/api/servers/${id}/files?path=${path}`);
+            const res = await axios.get(`/api/servers/${id}/files?path=${path}`);
             setFiles(res.data);
         } catch (e) {
             console.error(e);
         }
     };
 
-    useEffect(() => { fetchFiles(); }, [path, id]);
+    useEffect(() => { 
+        if (!editingFile) {
+            fetchFiles(); 
+        }
+    }, [path, id, editingFile]);
 
     const handleNavigate = (file: any) => {
         if (file.isDirectory) {
             setPath(prev => prev === '/' ? `/${file.name}` : `${prev}/${file.name}`);
+        } else {
+            // Check if text file to edit
+            const ext = file.name.split('.').pop()?.toLowerCase();
+            const textExts = ['txt', 'json', 'yml', 'yaml', 'properties', 'log', 'sh', 'bat'];
+            if (textExts.includes(ext || '')) {
+                openEditor(file.name);
+            }
         }
     };
     
@@ -34,15 +55,143 @@ export const Files = () => {
 
     const handleDelete = async (e: React.MouseEvent, file: any) => {
         e.stopPropagation();
-        if (!confirm('Delete ' + file.name + '?')) return;
+        if (!confirm(`Delete ${file.name}?`)) return;
         const targetPath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
         try {
-            await axios.delete(`http://192.168.1.6:3001/api/servers/${id}/files?path=${targetPath}`);
+            await axios.delete(`/api/servers/${id}/files?path=${targetPath}`);
             fetchFiles();
         } catch (e) {
             console.error('Delete failed');
         }
     };
+
+    const handleDownload = (e: React.MouseEvent, file: any) => {
+        e.stopPropagation();
+        const targetPath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
+        window.open(`/api/servers/${id}/files?path=${encodeURIComponent(targetPath)}&action=download`, '_blank');
+    };
+
+    const openEditor = async (filename: string) => {
+        const targetPath = path === '/' ? `/${filename}` : `${path}/${filename}`;
+        try {
+            const res = await axios.get(`/api/servers/${id}/files/content?path=${targetPath}`);
+            setFileContent(res.data.content);
+            setEditingFile(filename);
+        } catch (e) {
+            console.error('Failed to open file');
+        }
+    };
+
+    const saveEditor = async () => {
+        if (!editingFile) return;
+        setSaving(true);
+        const targetPath = path === '/' ? `/${editingFile}` : `${path}/${editingFile}`;
+        try {
+            await axios.post(`/api/servers/${id}/files/content?path=${targetPath}`, { content: fileContent });
+            setEditingFile(null);
+        } catch (e) {
+            console.error('Save failed');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const createFolder = async () => {
+        const name = prompt('Folder Name:');
+        if (!name) return;
+        const targetPath = path === '/' ? `/${name}` : `${path}/${name}`;
+        try {
+            await axios.post(`/api/servers/${id}/files/folder?path=${targetPath}`);
+            fetchFiles();
+        } catch (e) {
+            alert('Failed to create folder');
+        }
+    };
+
+    const renameFile = async (e: React.MouseEvent, file: any) => {
+        e.stopPropagation();
+        const newName = prompt('New Name:', file.name);
+        if (!newName || newName === file.name) return;
+        const targetPath = path === '/' ? `/${newName}` : `${path}/${newName}`;
+        const sourcePath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
+        try {
+            await axios.put(`/api/servers/${id}/files/move?path=${sourcePath}`, { targetPath });
+            fetchFiles();
+        } catch (e) {
+            alert('Rename failed');
+        }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+        
+        const formData = new FormData();
+        Array.from(e.target.files).forEach(f => {
+            formData.append('files', f);
+            // Some browsers provide webkitRelativePath for folder uploads
+            formData.append('paths', f.webkitRelativePath || f.name);
+        });
+
+        try {
+            await axios.post(`/api/servers/${id}/files/upload?path=${path}`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            fetchFiles();
+        } catch (err) {
+            alert('Upload failed');
+        }
+        
+        if (e.target) e.target.value = '';
+    };
+
+    const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+        const formData = new FormData();
+        formData.append('file', e.target.files[0]);
+        
+        try {
+            await axios.post(`/api/servers/${id}/files/extract?path=${path}`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            fetchFiles();
+        } catch (err) {
+            alert('Upload and extraction failed');
+        }
+        if (e.target) e.target.value = '';
+    };
+    const handleExtract = async (e: React.MouseEvent, file: any) => {
+        e.stopPropagation();
+        if (!confirm(`Extract ${file.name} to current directory?`)) return;
+        // In this architecture we can't extract remote files easily without a specific route.
+        // Wait, the backend route POST /extract expects an UPLOADED file.
+        // We should add an endpoint to extract an existing remote zip.
+        alert('Extraction of remote zips is coming soon. Please upload and extract instead.');
+    };
+
+    if (editingFile) {
+        return (
+            <div className="max-w-5xl space-y-4">
+                <div className="flex items-center justify-between bg-black/40 p-4 rounded-xl border border-white/5">
+                    <div className="text-white font-medium flex items-center gap-2">
+                        <Edit2 size={16} className="text-blue-400" />
+                        {editingFile}
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => setEditingFile(null)} className="glass-button px-4 py-2 hover:bg-white/5">Cancel</button>
+                        <button onClick={saveEditor} disabled={saving} className="glass-button bg-blue-500/20 text-blue-300 border-blue-500/30 px-4 py-2 flex gap-2">
+                            <Save size={16}/> {saving ? 'Saving...' : 'Save'}
+                        </button>
+                    </div>
+                </div>
+                <textarea 
+                    value={fileContent}
+                    onChange={e => setFileContent(e.target.value)}
+                    className="w-full h-[600px] bg-[#0d1117] text-slate-300 font-mono p-4 rounded-xl border border-white/5 focus:outline-none focus:border-blue-500/50"
+                    spellCheck="false"
+                />
+            </div>
+        );
+    }
 
     return (
         <div className="max-w-5xl space-y-6">
@@ -51,6 +200,18 @@ export const Files = () => {
                     <div>
                         <h3 className="text-lg font-semibold text-white">File Manager</h3>
                         <p className="text-sm text-slate-400 mt-1">Browse and manage server files directly.</p>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={createFolder} className="glass-button px-4 py-2 flex items-center gap-2"><Plus size={16}/> Folder</button>
+                        
+                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" multiple />
+                        <button onClick={() => fileInputRef.current?.click()} className="glass-button bg-blue-500/10 text-blue-400 border-blue-500/20 px-4 py-2 flex items-center gap-2">
+                            <Upload size={16}/> Upload Files
+                        </button>
+                        <input type="file" accept=".zip" ref={zipInputRef} onChange={handleZipUpload} className="hidden" />
+                        <button onClick={() => zipInputRef.current?.click()} className="glass-button bg-purple-500/10 text-purple-400 border-purple-500/20 px-4 py-2 flex items-center gap-2">
+                            <Archive size={16}/> Upload & Extract Zip
+                        </button>
                     </div>
                 </div>
                 
@@ -68,7 +229,7 @@ export const Files = () => {
                         <tbody className="divide-y divide-white/[0.04]">
                             {files.length === 0 ? (
                                 <tr>
-                                    <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
+                                    <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
                                         This directory is empty.
                                     </td>
                                 </tr>
@@ -79,7 +240,9 @@ export const Files = () => {
                                         <span className="font-semibold text-white">{f.name}</span>
                                     </td>
                                     <td className="px-6 py-3.5 text-slate-500">{f.size} B</td>
-                                    <td className="px-6 py-3.5 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <td className="px-6 py-3.5 text-right opacity-0 group-hover:opacity-100 transition-opacity space-x-2">
+                                        <button onClick={(e) => renameFile(e, f)} className="glass-button p-2 text-slate-400 hover:text-white" title="Rename"><Edit2 size={14}/></button>
+                                        <button onClick={(e) => handleDownload(e, f)} className="glass-button p-2 text-slate-400 hover:text-white" title="Download"><Download size={14}/></button>
                                         <button onClick={(e) => handleDelete(e, f)} className="glass-button bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 hover:text-red-300 p-2 rounded-md">
                                             <Trash size={14} />
                                         </button>
@@ -93,3 +256,4 @@ export const Files = () => {
         </div>
     );
 };
+

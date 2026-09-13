@@ -54,10 +54,10 @@ export class ServerController {
 
     static async updateServer(req: Request, res: Response) {
         try {
-            const { name, port, minRamMb, maxRamMb, javaRuntimeId } = req.body;
+            const { name, port, minRamMb, maxRamMb, javaRuntimeId, publicAddress } = req.body;
             const server = await prisma.server.update({
                 where: { id: req.params.id },
-                data: { name, port, minRamMb, maxRamMb, javaRuntimeId }
+                data: { name, port, minRamMb, maxRamMb, javaRuntimeId, publicAddress }
             });
             res.json(server);
         } catch (error) {

@@ -9,6 +9,9 @@ export interface Server {
     minecraftVersion: string;
     software: string;
     port: number;
+    publicAddress?: string;
+    minRamMb: number;
+    maxRamMb: number;
 }
 
 interface ServersState {
@@ -21,7 +24,7 @@ export const useServersStore = create<ServersState>((set) => ({
     servers: [],
     fetchServers: async () => {
         try {
-            const res = await axios.get('http://192.168.1.6:3001/api/servers');
+            const res = await axios.get('/api/servers');
             set({ servers: res.data });
         } catch (e) {
             console.error('Failed to fetch servers', e);

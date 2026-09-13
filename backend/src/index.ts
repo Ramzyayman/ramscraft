@@ -10,6 +10,7 @@ import filesRoutes from './routes/files.routes';
 import settingsRoutes from './routes/settings.routes';
 import backupsRoutes from './routes/backups.routes';
 import playersRoutes from './routes/players.routes';
+import worldsRoutes from './routes/worlds.routes';
 import { ReconciliationService } from './services/ReconciliationService';
 import { wsService } from './services/WebSocketService';
 import { MetricsStreamer } from './services/MetricsStreamer';
@@ -31,6 +32,7 @@ app.use('/api/servers', filesRoutes);
 app.use('/api/servers', settingsRoutes);
 app.use('/api/servers', backupsRoutes);
 app.use('/api/servers', playersRoutes);
+app.use('/api/servers', worldsRoutes);
 
 // Serve Frontend
 const frontendDist = require('path').join(process.cwd(), '..', 'frontend', 'dist');

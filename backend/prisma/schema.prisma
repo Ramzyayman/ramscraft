@@ -12,6 +12,7 @@ model Server {
   name             String    @unique
   directoryName    String    @unique
   port             Int       @unique
+  publicAddress    String?
   minRamMb         Int
   maxRamMb         Int
   eulaAccepted     Boolean   @default(false)
@@ -65,3 +66,4 @@ model MetadataCache {
 
   @@unique([provider, key])
 }
+
