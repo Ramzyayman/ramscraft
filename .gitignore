@@ -1,0 +1,11 @@
+﻿node_modules/
+dist/
+build/
+*.tar.gz
+*.log
+*.sqlite
+*.sqlite-journal
+*.db
+.env
+files_to_tar.txt
+.DS_Store

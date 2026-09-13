@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Server {
+  id               String    @id @default(uuid())
+  name             String    @unique
+  directoryName    String    @unique
+  port             Int       @unique
+  minRamMb         Int
+  maxRamMb         Int
+  eulaAccepted     Boolean   @default(false)
+  javaRuntimeId    String?
+
+  status           String    @default("RECOVERING")
+  tmuxSessionName  String?   @unique
+  lastKnownPid     Int?      
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  lastStartedAt    DateTime?
+  lastStoppedAt    DateTime?
+
+  software         Software?
+  backups          Backup[]
+}
+
+model Software {
+  id               String  @id @default(uuid())
+  serverId         String  @unique
+  provider         String  
+  mcVersion        String
+  releaseId        String  
+  installerUrl     String?
+  server           Server  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model JavaRuntime {
+  id               String  @id @default(uuid())
+  name             String  
+  path             String  
+  majorVersion     Int     
+}
+
+model Backup {
+  id               String   @id @default(uuid())
+  serverId         String
+  filename         String
+  sizeBytes        BigInt
+  createdAt        DateTime @default(now())
+  server           Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model MetadataCache {
+  id        String   @id @default(uuid())
+  provider  String   
+  key       String   
+  payload   String   
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, key])
+}

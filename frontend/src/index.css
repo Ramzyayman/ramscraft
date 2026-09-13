@@ -1,0 +1,50 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+body, html {
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  margin: 0;
+  background-color: #0d1117; /* Fallback */
+}
+
+/* Base background layer from RamsesHub */
+.bg-ramses {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: url('/bg.jpg') no-repeat center center fixed;
+  background-size: cover;
+  filter: blur(12px) brightness(0.7); /* Slightly darker than homepage for readability */
+  z-index: -1;
+  transform: scale(1.05);
+}
+
+/* Reusable Glass Components (Opaque version for Control Panel) */
+@layer components {
+  .glass-panel {
+    @apply bg-[#0d1117]/85 backdrop-blur-md border border-white/[0.06] shadow-lg;
+  }
+  
+  .glass-card {
+    @apply bg-[#0d1117]/75 backdrop-blur-md border border-white/[0.06] rounded-[10px] shadow-[0_4px_20px_rgba(0,0,0,0.2)] transition-all duration-200;
+  }
+  
+  .glass-card:hover {
+    @apply bg-[#141923]/85 border-white/[0.15] -translate-y-[2px] shadow-[0_8px_30px_rgba(0,0,0,0.4)];
+  }
+
+  .glass-button {
+    @apply bg-white/5 backdrop-blur-[5px] border border-white/10 text-slate-300 rounded-md text-[13px] font-medium transition-all;
+  }
+  
+  .glass-button:hover:not(:disabled) {
+    @apply bg-white/10 text-white;
+  }
+
+  .glass-input {
+    @apply bg-black/40 border border-white/10 rounded-md text-white px-3 py-2 focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/20 transition-all;
+  }
+}

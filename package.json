@@ -1,0 +1,9 @@
+{
+  "name": "ramscraft",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "frontend",
+    "backend"
+  ]
+}
