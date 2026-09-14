@@ -8,6 +8,7 @@ import { ServerConsolePage } from './pages/server/ServerConsolePage';
 import { ServerLayout } from './layouts/ServerLayout';
 import { Settings } from './pages/server/Settings';
 import { Players } from './pages/server/Players';
+import { PlayerDetail } from './pages/server/PlayerDetail';
 import { Files } from './pages/server/Files';
 import { Backups } from './pages/server/Backups';
 import { Worlds } from './pages/server/Worlds';
@@ -69,6 +70,7 @@ function App() {
                             <Route path="console" element={<ServerConsolePage />} />
                             <Route path="settings" element={<Settings />} />
                             <Route path="players" element={<Players />} />
+                            <Route path="players/:uuid" element={<PlayerDetail />} />
                             <Route path="software" element={<Software />} />
                             <Route path="files" element={<Files />} />
                             <Route path="worlds" element={<Worlds />} />

@@ -119,6 +119,49 @@ export class ProcessService {
         await run('tmux', ['send-keys', '-t', sessionName, 'Enter']);
     }
 
+    /**
+     * Send a console command and return the console messages the server printed
+     * after it (text after the "[time LEVEL]:" prefix), read back from the
+     * pipe-pane log. Waits `waitMs`, or with `until` up to 10s for a matching line.
+     * ponytail: shares the console with everything else, so unrelated lines logged
+     * in the same window are included; a plugin/RCON reply channel is the upgrade.
+     */
+    public async sendCommandCapture(id: string, command: string, opts: { waitMs?: number; until?: RegExp } = {}): Promise<string[]> {
+        const logPath = this.getLogFilePath(id);
+        const start = fs.existsSync(logPath) ? fs.statSync(logPath).size : 0;
+        await this.sendCommand(id, command);
+
+        const deadline = Date.now() + (opts.until ? 10_000 : opts.waitMs ?? 800);
+        let messages: string[] = [];
+        do {
+            await new Promise(r => setTimeout(r, 200));
+            messages = this.readConsoleMessages(logPath, start);
+        } while (Date.now() < deadline && !(opts.until && messages.some(m => opts.until!.test(m))));
+        return messages;
+    }
+
+    private readConsoleMessages(logPath: string, from: number): string[] {
+        let text = '';
+        try {
+            const fd = fs.openSync(logPath, 'r');
+            try {
+                const size = fs.fstatSync(fd).size;
+                const buf = Buffer.alloc(Math.max(0, size - from));
+                fs.readSync(fd, buf, 0, buf.length, from);
+                text = buf.toString('utf8');
+            } finally {
+                fs.closeSync(fd);
+            }
+        } catch {
+            return [];
+        }
+        // Paper: "[18:58:22 INFO]: msg"   Vanilla: "[18:58:22] [Server thread/INFO]: msg"
+        const prefix = /\[\d{2}:\d{2}:\d{2}[^\]]*\](?: \[[^\]]*\])?: ?(.*)$/;
+        return stripAnsi(text).split('\n')
+            .map(line => line.match(prefix)?.[1]?.trim())
+            .filter((m): m is string => !!m);
+    }
+
     public async stopServer(id: string, timeoutMs: number = 60000): Promise<void> {
         await prisma.server.update({ where: { id }, data: { status: ServerStatus.STOPPING } });
         wsService.emitServerStatus(id, ServerStatus.STOPPING);

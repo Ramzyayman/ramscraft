@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { File, Folder, Trash, Upload, Search, CornerLeftUp, Download, Edit2, Archive, Save, X, Plus } from 'lucide-react';
+import { useDialog } from '../../components/Dialog';
 
 const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -15,6 +16,7 @@ const formatBytes = (bytes: number) => {
 export const Files = () => {
     const { id } = useParams();
     const [path, setPath] = useState('/');
+    const { dialog, confirm, prompt } = useDialog();
     const [files, setFiles] = useState<any[]>([]);
     
     // Editor State
@@ -64,13 +66,19 @@ export const Files = () => {
 
     const handleDelete = async (e: React.MouseEvent, file: any) => {
         e.stopPropagation();
-        if (!confirm(`Delete ${file.name}?`)) return;
+        if (!(await confirm({
+            title: `Delete ${file.isDirectory ? 'Folder' : 'File'}`,
+            message: <>Permanently delete <span className="font-semibold text-white">{file.name}</span>{file.isDirectory ? ' and everything inside it' : ''}? This cannot be undone.</>,
+            confirmLabel: 'Delete',
+            tone: 'danger',
+        }))) return;
         const targetPath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
         try {
             await axios.delete(`/api/servers/${id}/files?path=${targetPath}`);
+            toast.success(`Deleted ${file.name}`);
             fetchFiles();
-        } catch (e) {
-            console.error('Delete failed');
+        } catch (e: any) {
+            toast.error(e.response?.data?.error || 'Delete failed');
         }
     };
 
@@ -86,8 +94,8 @@ export const Files = () => {
             const res = await axios.get(`/api/servers/${id}/files/content?path=${targetPath}`);
             setFileContent(res.data.content);
             setEditingFile(filename);
-        } catch (e) {
-            console.error('Failed to open file');
+        } catch (e: any) {
+            toast.error(e.response?.data?.error || 'Failed to open file');
         }
     };
 
@@ -97,37 +105,40 @@ export const Files = () => {
         const targetPath = path === '/' ? `/${editingFile}` : `${path}/${editingFile}`;
         try {
             await axios.post(`/api/servers/${id}/files/content?path=${targetPath}`, { content: fileContent });
+            toast.success(`Saved ${editingFile}`);
             setEditingFile(null);
-        } catch (e) {
-            console.error('Save failed');
+        } catch (e: any) {
+            toast.error(e.response?.data?.error || 'Save failed');
         } finally {
             setSaving(false);
         }
     };
 
     const createFolder = async () => {
-        const name = prompt('Folder Name:');
+        const name = await prompt({ title: 'New Folder', confirmLabel: 'Create', input: { placeholder: 'Folder name' } });
         if (!name) return;
         const targetPath = path === '/' ? `/${name}` : `${path}/${name}`;
         try {
             await axios.post(`/api/servers/${id}/files/folder?path=${targetPath}`);
+            toast.success(`Created folder ${name}`);
             fetchFiles();
-        } catch (e) {
-            toast.error('Failed to create folder');
+        } catch (e: any) {
+            toast.error(e.response?.data?.error || 'Failed to create folder');
         }
     };
 
     const renameFile = async (e: React.MouseEvent, file: any) => {
         e.stopPropagation();
-        const newName = prompt('New Name:', file.name);
+        const newName = await prompt({ title: `Rename ${file.name}`, confirmLabel: 'Rename', input: { defaultValue: file.name } });
         if (!newName || newName === file.name) return;
         const targetPath = path === '/' ? `/${newName}` : `${path}/${newName}`;
         const sourcePath = path === '/' ? `/${file.name}` : `${path}/${file.name}`;
         try {
             await axios.put(`/api/servers/${id}/files/move?path=${sourcePath}`, { targetPath });
+            toast.success(`Renamed to ${newName}`);
             fetchFiles();
-        } catch (e) {
-            toast.error('Rename failed');
+        } catch (e: any) {
+            toast.error(e.response?.data?.error || 'Rename failed');
         }
     };
 
@@ -145,6 +156,7 @@ export const Files = () => {
             await axios.post(`/api/servers/${id}/files/upload?path=${path}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
+            toast.success('Upload complete');
             fetchFiles();
         } catch (err) {
             toast.error('Upload failed');
@@ -162,6 +174,7 @@ export const Files = () => {
             await axios.post(`/api/servers/${id}/files/extract?path=${path}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
+            toast.success('Zip uploaded and extracted');
             fetchFiles();
         } catch (err) {
             toast.error('Upload and extraction failed');
@@ -170,11 +183,8 @@ export const Files = () => {
     };
     const handleExtract = async (e: React.MouseEvent, file: any) => {
         e.stopPropagation();
-        if (!confirm(`Extract ${file.name} to current directory?`)) return;
-        // In this architecture we can't extract remote files easily without a specific route.
-        // Wait, the backend route POST /extract expects an UPLOADED file.
-        // We should add an endpoint to extract an existing remote zip.
-        toast.error('Extraction of remote zips is coming soon. Please upload and extract instead.');
+        // No endpoint extracts an already-uploaded zip yet (POST /extract takes an upload), so don't ask first.
+        toast.error(`Extracting ${file.name} on the server isn't supported yet. Use "Upload Zip" to upload and extract it instead.`);
     };
 
     if (editingFile) {
@@ -204,6 +214,7 @@ export const Files = () => {
 
     return (
         <div className="max-w-5xl space-y-6">
+            {dialog}
             <div className="glass-panel rounded-xl overflow-hidden">
                 <div className="p-5 border-b border-white/[0.04] bg-white/[0.02] flex items-center justify-between">
                     <div>

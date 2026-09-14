@@ -4,12 +4,14 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useServersStore } from '../../store/useServersStore';
 import { Save, AlertTriangle } from 'lucide-react';
 import axios from 'axios';
+import { useDialog } from '../../components/Dialog';
 
 export const Settings = () => {
     const { id } = useParams<{id: string}>();
     const server = useServersStore(s => s.servers.find(srv => srv.id === id));
     const fetchServers = useServersStore(s => s.fetchServers);
     const navigate = useNavigate();
+    const { dialog, confirm } = useDialog();
 
     // Instance State
     const [name, setName] = useState('');
@@ -20,7 +22,12 @@ export const Settings = () => {
     const [isDeleting, setIsDeleting] = useState(false);
 
     const handleDelete = async () => {
-        if (!window.confirm('Are you absolutely sure you want to delete this server? All files and worlds will be permanently destroyed!')) return;
+        if (!(await confirm({
+            title: 'Delete Server',
+            message: <><span className="font-bold text-red-400">WARNING:</span> This permanently deletes the server and all of its files, worlds and backups. This cannot be undone.</>,
+            confirmLabel: 'Delete Server',
+            tone: 'danger',
+        }))) return;
         
         setIsDeleting(true);
         try {
@@ -100,6 +107,7 @@ export const Settings = () => {
 
     return (
         <div className="max-w-4xl space-y-6">
+            {dialog}
             {/* Instance Settings */}
             <div className="glass-panel rounded-xl overflow-hidden">
                 <div className="p-5 border-b border-white/[0.04] bg-white/[0.02]">

@@ -6,8 +6,61 @@ import { ServerStatus } from '@ramscraft/shared';
 import { serverRoot } from '../utils/paths';
 import { run } from '../utils/exec';
 import { processService } from '../services/ProcessService';
+import { wsService } from '../services/WebSocketService';
+import { spawn } from 'child_process';
 
 const router = Router();
+
+/** Broadcast `backupProgress` {serverId, operation, phase, percent}; only sends when phase or percent changes. */
+function progressReporter(serverId: string, operation: 'create' | 'restore') {
+    let last = '';
+    return (phase: string, percent: number) => {
+        const p = Math.max(0, Math.min(99, Math.floor(percent)));
+        if (`${phase}:${p}` === last) return;
+        last = `${phase}:${p}`;
+        wsService.io?.emit('backupProgress', { serverId, operation, phase, percent: p });
+    };
+}
+
+/**
+ * Run tar (argv, no shell) while reporting progress in percent:
+ *  - `input`: the archive is streamed into tar's stdin, so progress = archive bytes read.
+ *  - `totalBytes`: GNU tar prints a checkpoint every 1000 records (10 KiB each), i.e. bytes archived.
+ */
+function runTar(args: string[], opts: { input?: string; totalBytes?: number; onProgress: (percent: number) => void }):
+    Promise<{ code: number; stdout: string; stderr: string }> {
+    return new Promise(resolve => {
+        const child = spawn('tar', opts.totalBytes ? ['--checkpoint=1000', ...args] : args);
+        let stdout = '', stderr = '', pending = '';
+        const timer = setTimeout(() => child.kill('SIGKILL'), 30 * 60_000);
+
+        child.stdout.on('data', (b: Buffer) => { stdout += b.toString(); });
+        child.stderr.on('data', (b: Buffer) => {
+            const lines = (pending + b.toString()).split('\n');
+            pending = lines.pop() ?? '';
+            for (const line of lines) {
+                const cp = line.match(/(?:Read|Write) checkpoint (\d+)/);
+                if (cp && opts.totalBytes) opts.onProgress(Number(cp[1]) * 10240 / opts.totalBytes * 100);
+                else if (line) stderr += line + '\n';
+            }
+        });
+
+        if (opts.input) {
+            const size = fs.statSync(opts.input).size || 1;
+            let read = 0;
+            const stream = fs.createReadStream(opts.input);
+            stream.on('data', chunk => { read += chunk.length; opts.onProgress(read / size * 100); });
+            stream.on('error', () => child.kill());
+            child.stdin.on('error', () => { /* tar exited early; its exit code reports why */ });
+            stream.pipe(child.stdin);
+        } else {
+            child.stdin.end();
+        }
+
+        child.on('error', e => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: e.message }); });
+        child.on('close', code => { clearTimeout(timer); resolve({ code: code ?? -1, stdout, stderr: stderr + pending }); });
+    });
+}
 
 function backupDirFor(directoryName: string): string {
     // Sibling of the server directory: <serversRoot>/<directoryName>_backups
@@ -57,9 +110,14 @@ router.post('/:id/backups', async (req, res) => {
         const tmpPath = path.join(dir, `.${backupName}.partial`);
         const finalPath = path.join(dir, backupName);
 
+        const report = progressReporter(server.id, 'create');
+        report('Preparing', 0);
+        const du = await run('du', ['-sb', serverDir], { timeoutMs: 60_000 });
+        const totalBytes = parseInt(du.stdout, 10) || 1;
+
         // Create the archive to a temp file, then atomically rename on success so a
         // failed/partial archive is never presented as a valid backup.
-        const r = await run('tar', ['-czf', tmpPath, '-C', serverDir, '.'], { timeoutMs: 30 * 60_000 });
+        const r = await runTar(['-czf', tmpPath, '-C', serverDir, '.'], { totalBytes, onProgress: p => report('Archiving', p) });
         if (r.code !== 0) {
             if (fs.existsSync(tmpPath)) fs.rmSync(tmpPath, { force: true });
             return res.status(500).json({ error: `Backup failed: ${r.stderr || 'tar error'}` });
@@ -89,8 +147,10 @@ router.post('/:id/backups/:file/restore', async (req, res) => {
         const targetFile = backupFilePath(server.directoryName, req.params.file);
         if (!fs.existsSync(targetFile)) return res.status(404).json({ error: 'Backup not found' });
 
+        const report = progressReporter(server.id, 'restore');
+
         // 1. Verify the archive is readable and contains no unsafe (absolute / ..) paths.
-        const list = await run('tar', ['-tzf', targetFile], { timeoutMs: 5 * 60_000 });
+        const list = await runTar(['-tzf', '-'], { input: targetFile, onProgress: p => report('Verifying', p) });
         if (list.code !== 0) return res.status(400).json({ error: 'Backup archive is unreadable or corrupt' });
         const entries = list.stdout.split('\n').map(s => s.trim()).filter(Boolean);
         if (entries.length === 0) return res.status(400).json({ error: 'Backup archive is empty' });
@@ -104,7 +164,7 @@ router.post('/:id/backups/:file/restore', async (req, res) => {
         // 2. Extract into an isolated temp dir (never touch the live dir until success).
         tmpDir = `${serverDir}.restore-${Date.now()}`;
         fs.mkdirSync(tmpDir, { recursive: true });
-        const ext = await run('tar', ['-xzf', targetFile, '-C', tmpDir, '--no-same-owner'], { timeoutMs: 30 * 60_000 });
+        const ext = await runTar(['-xzf', '-', '-C', tmpDir, '--no-same-owner'], { input: targetFile, onProgress: p => report('Extracting', p) });
         if (ext.code !== 0) {
             fs.rmSync(tmpDir, { recursive: true, force: true });
             tmpDir = null;

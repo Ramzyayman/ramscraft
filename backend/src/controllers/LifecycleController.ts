@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import { processService } from '../services/ProcessService';
+import { wsService } from '../services/WebSocketService';
 import { providerRegistry } from '../providers/ProviderRegistry';
 import { selectJavaRuntime } from '../utils/java';
 import { serverRoot } from '../utils/paths';
@@ -30,10 +31,12 @@ export class LifecycleController {
                 const eulaContent = fs.readFileSync(eulaPath, 'utf8');
                 if (!eulaContent.includes('eula=true')) {
                     await prisma.server.update({ where: { id: server.id }, data: { status: ServerStatus.EULA_PENDING } });
+                    wsService.emitServerStatus(server.id, ServerStatus.EULA_PENDING);
                     return res.status(403).json({ error: 'EULA must be accepted.', status: ServerStatus.EULA_PENDING });
                 }
             } else {
                 await prisma.server.update({ where: { id: server.id }, data: { status: ServerStatus.EULA_PENDING } });
+                wsService.emitServerStatus(server.id, ServerStatus.EULA_PENDING);
                 return res.status(403).json({ error: 'EULA not found. Accept it to continue.', status: ServerStatus.EULA_PENDING });
             }
 
@@ -93,6 +96,7 @@ export class LifecycleController {
             fs.writeFileSync(eulaPath, 'eula=true\n');
 
             await prisma.server.update({ where: { id: server.id }, data: { eulaAccepted: true, status: ServerStatus.OFFLINE } });
+            wsService.emitServerStatus(server.id, ServerStatus.OFFLINE);
             res.json({ success: true });
         } catch (error: any) {
             res.status(500).json({ error: error.message });

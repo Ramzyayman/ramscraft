@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Database, RefreshCw, Trash, Plus, AlertTriangle } from 'lucide-react';
+import { socket } from '../../App';
 
 export const Backups = () => {
     const { id } = useParams();
@@ -11,6 +12,8 @@ export const Backups = () => {
     const [restoringFile, setRestoringFile] = useState<string | null>(null);
     const [showRestoreModal, setShowRestoreModal] = useState<string | null>(null);
     const [showDeleteModal, setShowDeleteModal] = useState<string | null>(null);
+    // Live progress from the backend's `backupProgress` socket event.
+    const [progress, setProgress] = useState<{ operation: 'create' | 'restore'; phase: string; percent: number } | null>(null);
 
     const fetchBackups = async () => {
         try {
@@ -23,6 +26,14 @@ export const Backups = () => {
 
     useEffect(() => { fetchBackups(); }, [id]);
 
+    useEffect(() => {
+        const onProgress = (data: any) => {
+            if (data.serverId === id) setProgress({ operation: data.operation, phase: data.phase, percent: data.percent });
+        };
+        socket.on('backupProgress', onProgress);
+        return () => { socket.off('backupProgress', onProgress); };
+    }, [id]);
+
     const handleCreate = async () => {
         setIsCreating(true);
         const toastId = toast.loading('Creating backup...');
@@ -34,6 +45,7 @@ export const Backups = () => {
             toast.error(e.response?.data?.error || 'Failed to start backup', { id: toastId });
         } finally {
             setIsCreating(false);
+            setProgress(null);
         }
     };
     
@@ -48,6 +60,7 @@ export const Backups = () => {
             toast.error(e.response?.data?.error || 'Restore failed', { id: toastId });
         } finally {
             setRestoringFile(null);
+            setProgress(null);
         }
     };
 
@@ -127,12 +140,28 @@ export const Backups = () => {
                         <h3 className="text-lg font-semibold text-white">Backups</h3>
                         <p className="text-sm text-slate-400 mt-1">Manage server backups and restoration points.</p>
                     </div>
-                    <button onClick={handleCreate} disabled={isCreating} className="glass-button bg-blue-600/20 text-blue-400 border-blue-500/30 hover:bg-blue-600/30 hover:text-white px-4 py-2 flex items-center gap-2 shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <button onClick={handleCreate} disabled={isCreating || !!restoringFile} className="glass-button bg-blue-600/20 text-blue-400 border-blue-500/30 hover:bg-blue-600/30 hover:text-white px-4 py-2 flex items-center gap-2 shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed">
                         <Plus size={16} />
                         {isCreating ? 'Creating...' : 'Create Backup'}
                     </button>
                 </div>
                 
+                {progress && (
+                    <div className="p-5 border-b border-white/[0.04] bg-black/20">
+                        <div className="flex justify-between text-sm mb-2">
+                            <span className="text-slate-300 flex items-center gap-2">
+                                <RefreshCw size={14} className="animate-spin text-blue-400" />
+                                {progress.operation === 'create' ? 'Creating backup' : 'Restoring backup'}: {progress.phase}...
+                            </span>
+                            <span className="text-white font-mono">{progress.percent}%</span>
+                        </div>
+                        <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
+                            <div className={`h-2 rounded-full transition-all duration-500 ${progress.operation === 'create' ? 'bg-blue-500' : 'bg-yellow-500'}`}
+                                style={{ width: `${progress.percent}%` }} />
+                        </div>
+                    </div>
+                )}
+
                 <div className="bg-black/20">
                     <table className="w-full text-left text-sm text-slate-300">
                         <thead className="bg-black/40 border-b border-white/[0.04]">
@@ -171,7 +200,7 @@ export const Backups = () => {
                                         })}
                                     </td>
                                     <td className="px-6 py-4 text-right space-x-2">
-                                        <button onClick={() => setShowRestoreModal(b.name)} disabled={restoringFile === b.name} className="glass-button bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 hover:text-yellow-300 px-3 py-1.5 inline-flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50">
+                                        <button onClick={() => setShowRestoreModal(b.name)} disabled={!!restoringFile || isCreating} className="glass-button bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20 hover:text-yellow-300 px-3 py-1.5 inline-flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50">
                                             <RefreshCw size={14} className={restoringFile === b.name ? 'animate-spin' : ''} /> {restoringFile === b.name ? 'Restoring...' : 'Restore'}
                                         </button>
                                         <button onClick={() => setShowDeleteModal(b.name)} className="glass-button bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20 hover:text-red-300 px-3 py-1.5 inline-flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

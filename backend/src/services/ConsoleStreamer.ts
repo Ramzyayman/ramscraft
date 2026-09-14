@@ -35,7 +35,9 @@ export class ConsoleStreamer {
 
         tailProcess.on('close', () => {
             console.log(`[ConsoleStreamer] Tail closed for ${serverId}`);
-            this.streamers.delete(serverId);
+            // A stopped tail can close after a replacement was started (leave + rejoin);
+            // only forget it if it's still the tracked one, or the replacement is orphaned.
+            if (this.streamers.get(serverId) === tailProcess) this.streamers.delete(serverId);
         });
 
         this.streamers.set(serverId, tailProcess);

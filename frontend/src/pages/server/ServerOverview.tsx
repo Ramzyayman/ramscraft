@@ -82,6 +82,11 @@ export const ServerOverview = () => {
             await axios.post(`/api/servers/${id}/lifecycle/${action}`);
             toast.success(`Server ${action} command sent`);
         } catch (error: any) {
+            if (error.response?.data?.status === 'EULA_PENDING') {
+                // Not a failure: the Accept EULA prompt replaces the buttons (refetch in case the socket missed it).
+                useServersStore.getState().fetchServers();
+                return;
+            }
             console.error('Power action failed', error);
             toast.error(`Failed to ${action} server: ${error.response?.data?.error || error.message}`);
         }
@@ -109,6 +114,7 @@ export const ServerOverview = () => {
     const handleEula = async () => {
         try {
             await axios.post(`/api/servers/${id}/lifecycle/eula`);
+            toast.success('EULA accepted. You can start the server now.');
             useServersStore.getState().fetchServers();
         } catch (error: any) {
             toast.error(`Failed to accept EULA: ${error.message}`);

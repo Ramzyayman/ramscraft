@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { Globe, Download, Trash, Plus, Upload, AlertTriangle } from 'lucide-react';
+import { useDialog } from '../../components/Dialog';
 
 export const Worlds = () => {
     const { id } = useParams();
@@ -12,6 +13,9 @@ export const Worlds = () => {
     const [properties, setProperties] = useState<any>({});
     const [showGeneratePrompt, setShowGeneratePrompt] = useState(false);
     const zipInputRef = useRef<HTMLInputElement>(null);
+    const { dialog, confirm } = useDialog();
+    // A crashed server is stopped too (same rule as the Software page).
+    const isOffline = server?.status === 'OFFLINE' || server?.status === 'CRASHED';
 
     const fetchData = async () => {
         try {
@@ -39,11 +43,17 @@ export const Worlds = () => {
     };
 
     const handleDelete = async (name: string) => {
-        if (server?.status !== 'OFFLINE') {
-            toast.error('Server must be OFFLINE to delete a world.');
+        if (!isOffline) {
+            toast.error('Stop the server before deleting a world.');
             return;
         }
-        
+        if (!(await confirm({
+            title: 'Delete World',
+            message: <>Permanently delete the world <span className="font-semibold text-white">{name}</span>? This cannot be undone. Create a backup first if you might need it.</>,
+            confirmLabel: 'Delete World',
+            tone: 'danger',
+        }))) return;
+
         const toastId = toast.loading(`Deleting world '${name}'...`);
         try {
             await axios.delete(`/api/servers/${id}/files?path=/${name}`);
@@ -56,8 +66,8 @@ export const Worlds = () => {
 
     const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.length) return;
-        if (server?.status !== 'OFFLINE') {
-            toast.error('Server must be OFFLINE to import a world.');
+        if (!isOffline) {
+            toast.error('Stop the server before importing a world.');
             return;
         }
         
@@ -80,8 +90,8 @@ export const Worlds = () => {
     };
 
     const requestCreateWorld = () => {
-        if (server?.status !== 'OFFLINE') {
-            toast.error('Server must be OFFLINE to safely generate a new world.');
+        if (!isOffline) {
+            toast.error('Stop the server before generating a new world.');
             return;
         }
         setShowGeneratePrompt(true);
@@ -103,6 +113,7 @@ export const Worlds = () => {
 
     return (
         <div className="max-w-5xl space-y-6">
+            {dialog}
             {showGeneratePrompt && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                     <div className="glass-panel w-full max-w-md p-6 rounded-xl border border-orange-500/30 shadow-2xl relative">
