@@ -107,7 +107,29 @@ export class SoftwareController {
                 create: { serverId, provider: providerId, mcVersion, releaseId: release.id, installerUrl: downloadInfo.url }
             });
 
-            res.json({ success: true, message: 'Software installed and verified', software, javaCompat });
+            // Auto-assign Java Runtime based on compatibility
+            let assignedJava = null;
+            if (javaCompat) {
+                const runtimes = await prisma.javaRuntime.findMany();
+                // Prefer the recommended major, else try minVersion
+                for (const major of [javaCompat.recommendedVersion, javaCompat.minVersion]) {
+                    if (major) {
+                        const match = runtimes.find(r => r.majorVersion === major);
+                        if (match) {
+                            assignedJava = match;
+                            break;
+                        }
+                    }
+                }
+                if (assignedJava) {
+                    await prisma.server.update({
+                        where: { id: serverId },
+                        data: { javaRuntimeId: assignedJava.id }
+                    });
+                }
+            }
+
+            res.json({ success: true, message: 'Software installed and verified', software, javaCompat, assignedJava });
         } catch (error: any) {
             res.status(500).json({ error: error.message });
         }

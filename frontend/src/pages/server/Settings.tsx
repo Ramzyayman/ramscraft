@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast';
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useServersStore } from '../../store/useServersStore';
@@ -28,7 +29,7 @@ export const Settings = () => {
             navigate('/');
         } catch (e) {
             console.error("Failed to delete server", e);
-            alert('Failed to delete server. Check the console for details.');
+            toast.error('Failed to delete server. Check the console for details.');
             setIsDeleting(false);
         }
     };
@@ -64,15 +65,17 @@ export const Settings = () => {
     const saveInstance = async () => {
         try {
             setSavingInstance(true);
-            await axios.put(`/api/servers/${id}`, {
+            await axios.patch(`/api/servers/${id}`, {
                 name,
                 publicAddress,
                 minRamMb: minRam,
                 maxRamMb: maxRam
             });
             await fetchServers();
-        } catch (e) {
+            toast.success('Instance settings saved successfully');
+        } catch (e: any) {
             console.error(e);
+            toast.error(e.response?.data?.error || 'Failed to save instance settings');
         } finally {
             setSavingInstance(false);
         }
@@ -82,8 +85,10 @@ export const Settings = () => {
         try {
             setSavingProps(true);
             await axios.patch(`/api/servers/${id}/settings`, properties);
-        } catch (e) {
+            toast.success('Minecraft configuration saved successfully');
+        } catch (e: any) {
             console.error(e);
+            toast.error(e.response?.data?.error || 'Failed to save configuration');
         } finally {
             setSavingProps(false);
         }
@@ -199,10 +204,10 @@ export const Settings = () => {
                                 onChange={e => updateProp('gamemode', e.target.value)}
                                 className="w-full glass-input appearance-none bg-black/40"
                             >
-                                <option value="survival">Survival</option>
-                                <option value="creative">Creative</option>
-                                <option value="adventure">Adventure</option>
-                                <option value="spectator">Spectator</option>
+                                <option className="bg-slate-900 text-white" value="survival">Survival</option>
+                                <option className="bg-slate-900 text-white" value="creative">Creative</option>
+                                <option className="bg-slate-900 text-white" value="adventure">Adventure</option>
+                                <option className="bg-slate-900 text-white" value="spectator">Spectator</option>
                             </select>
                         </div>
                         <div>
@@ -212,10 +217,10 @@ export const Settings = () => {
                                 onChange={e => updateProp('difficulty', e.target.value)}
                                 className="w-full glass-input appearance-none bg-black/40"
                             >
-                                <option value="peaceful">Peaceful</option>
-                                <option value="easy">Easy</option>
-                                <option value="normal">Normal</option>
-                                <option value="hard">Hard</option>
+                                <option className="bg-slate-900 text-white" value="peaceful">Peaceful</option>
+                                <option className="bg-slate-900 text-white" value="easy">Easy</option>
+                                <option className="bg-slate-900 text-white" value="normal">Normal</option>
+                                <option className="bg-slate-900 text-white" value="hard">Hard</option>
                             </select>
                         </div>
                         <div>

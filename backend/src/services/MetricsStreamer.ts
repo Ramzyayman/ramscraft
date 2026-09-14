@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import { processService } from './ProcessService';
-import { pingMinecraft } from '../utils/mcping';
+import { pingMinecraft, getMinecraftStats } from '../utils/mcping';
 import { serverRoot } from '../utils/paths';
 import pidusage from 'pidusage';
 import os from 'os';
@@ -99,11 +99,18 @@ export class MetricsStreamer {
                 try {
                     const stats = await pidusage(effectivePid);
                     const uptimeMs = server.lastStartedAt ? Date.now() - new Date(server.lastStartedAt).getTime() : 0;
+                    
+                    let players = null;
+                    if (server.status === ServerStatus.ONLINE) {
+                        players = await getMinecraftStats('127.0.0.1', server.port);
+                    }
+
                     this.io.to(`server_${server.id}`).emit('serverStats', {
                         serverId: server.id,
                         cpu: stats.cpu,
                         memory: stats.memory,
-                        uptimeMs
+                        uptimeMs,
+                        players
                     });
                 } catch { /* process may have just exited; next tick reconciles */ }
             }

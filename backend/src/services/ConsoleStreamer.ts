@@ -24,9 +24,8 @@ export class ConsoleStreamer {
         tailProcess.stdout.on('data', (data: Buffer) => {
             const lines = data.toString().split('\n');
             for (let raw of lines) {
-                const line = stripAnsi(raw);
-                if (line) {
-                    io.to(`server_${serverId}`).emit('consoleLine', { serverId, line });
+                if (raw) {
+                    io.to(`server_${serverId}`).emit('consoleLine', { serverId, line: raw });
                 }
             }
         });

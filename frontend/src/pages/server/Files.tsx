@@ -1,7 +1,16 @@
+import toast from 'react-hot-toast';
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
 import { File, Folder, Trash, Upload, Search, CornerLeftUp, Download, Edit2, Archive, Save, X, Plus } from 'lucide-react';
+
+const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
 
 export const Files = () => {
     const { id } = useParams();
@@ -104,7 +113,7 @@ export const Files = () => {
             await axios.post(`/api/servers/${id}/files/folder?path=${targetPath}`);
             fetchFiles();
         } catch (e) {
-            alert('Failed to create folder');
+            toast.error('Failed to create folder');
         }
     };
 
@@ -118,7 +127,7 @@ export const Files = () => {
             await axios.put(`/api/servers/${id}/files/move?path=${sourcePath}`, { targetPath });
             fetchFiles();
         } catch (e) {
-            alert('Rename failed');
+            toast.error('Rename failed');
         }
     };
 
@@ -138,7 +147,7 @@ export const Files = () => {
             });
             fetchFiles();
         } catch (err) {
-            alert('Upload failed');
+            toast.error('Upload failed');
         }
         
         if (e.target) e.target.value = '';
@@ -155,7 +164,7 @@ export const Files = () => {
             });
             fetchFiles();
         } catch (err) {
-            alert('Upload and extraction failed');
+            toast.error('Upload and extraction failed');
         }
         if (e.target) e.target.value = '';
     };
@@ -165,7 +174,7 @@ export const Files = () => {
         // In this architecture we can't extract remote files easily without a specific route.
         // Wait, the backend route POST /extract expects an UPLOADED file.
         // We should add an endpoint to extract an existing remote zip.
-        alert('Extraction of remote zips is coming soon. Please upload and extract instead.');
+        toast.error('Extraction of remote zips is coming soon. Please upload and extract instead.');
     };
 
     if (editingFile) {
@@ -239,7 +248,7 @@ export const Files = () => {
                                         {f.isDirectory ? <Folder size={18} className="text-blue-400" /> : <File size={18} className="text-slate-400" />}
                                         <span className="font-semibold text-white">{f.name}</span>
                                     </td>
-                                    <td className="px-6 py-3.5 text-slate-500">{f.size} B</td>
+                                    <td className="px-6 py-3.5 text-slate-500">{f.isDirectory ? '--' : formatBytes(f.size)}</td>
                                     <td className="px-6 py-3.5 text-right opacity-0 group-hover:opacity-100 transition-opacity space-x-2">
                                         <button onClick={(e) => renameFile(e, f)} className="glass-button p-2 text-slate-400 hover:text-white" title="Rename"><Edit2 size={14}/></button>
                                         <button onClick={(e) => handleDownload(e, f)} className="glass-button p-2 text-slate-400 hover:text-white" title="Download"><Download size={14}/></button>

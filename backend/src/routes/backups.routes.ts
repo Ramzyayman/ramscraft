@@ -131,4 +131,19 @@ router.post('/:id/backups/:file/restore', async (req, res) => {
     }
 });
 
+router.delete('/:id/backups/:file', async (req, res) => {
+    try {
+        const server = await prisma.server.findUnique({ where: { id: req.params.id } });
+        if (!server) return res.status(404).json({ error: 'Not found' });
+        
+        const targetFile = backupFilePath(server.directoryName, req.params.file);
+        if (!fs.existsSync(targetFile)) return res.status(404).json({ error: 'Backup not found' });
+        
+        fs.rmSync(targetFile, { force: true });
+        res.json({ success: true, message: 'Backup deleted successfully' });
+    } catch (e: any) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 export default router;

@@ -1,38 +1,72 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
 import { socket } from '../App';
 
 export const Console = ({ serverId }: { serverId: string }) => {
-    const [lines, setLines] = useState<string[]>([]);
+    const terminalRef = useRef<HTMLDivElement>(null);
+    const xtermRef = useRef<Terminal | null>(null);
+    const fitAddonRef = useRef<FitAddon | null>(null);
     const [input, setInput] = useState('');
-    const endRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
+        if (!terminalRef.current) return;
+
+        const term = new Terminal({
+            theme: {
+                background: '#050505',
+                foreground: '#d1d5db',
+                cursor: 'transparent',
+                selectionBackground: 'rgba(255, 255, 255, 0.3)'
+            },
+            fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+            fontSize: 13,
+            disableStdin: true,
+            convertEol: true
+        });
+        
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(terminalRef.current);
+        fitAddon.fit();
+
+        xtermRef.current = term;
+        fitAddonRef.current = fitAddon;
+
+        const handleResize = () => {
+            fitAddon.fit();
+        };
+        window.addEventListener('resize', handleResize);
+
         const handleLog = (data: {serverId: string, line: string}) => {
             if (data.serverId === serverId) {
-                setLines(prev => [...prev, data.line].slice(-1000));
+                term.writeln(data.line);
             }
         };
+
         const handleHistory = (data: {serverId: string, history: string}) => {
             if (data.serverId === serverId) {
-                setLines(data.history.split('\n').filter(l => l));
+                term.clear();
+                const lines = data.history.split('\n');
+                lines.forEach(line => {
+                    if (line) term.writeln(line);
+                });
             }
         };
 
         socket.on('consoleLine', handleLog);
         socket.on('consoleHistory', handleHistory);
-
         socket.emit('subscribe:server', serverId);
 
         return () => {
+            window.removeEventListener('resize', handleResize);
             socket.off('consoleLine', handleLog);
             socket.off('consoleHistory', handleHistory);
             socket.emit('unsubscribe:server', serverId);
+            term.dispose();
         };
     }, [serverId]);
-
-    useEffect(() => {
-        endRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [lines]);
 
     const handleCommand = (e: React.FormEvent) => {
         e.preventDefault();
@@ -46,18 +80,13 @@ export const Console = ({ serverId }: { serverId: string }) => {
             <div className="p-4 border-b border-white/[0.04] bg-white/[0.02] flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-white">Live Console</h3>
                 <div className="flex gap-2">
-                    <button className="glass-button px-3 py-1 text-xs">Clear</button>
-                    <button className="glass-button px-3 py-1 text-xs">Auto-scroll</button>
+                    <button onClick={() => xtermRef.current?.clear()} className="glass-button px-3 py-1 text-xs">Clear</button>
+                    <button onClick={() => xtermRef.current?.scrollToBottom()} className="glass-button px-3 py-1 text-xs">Scroll to Bottom</button>
                 </div>
             </div>
             
-            <div className="flex-1 bg-[#050505]/90 overflow-y-auto p-4 font-mono text-sm">
-                {lines.map((line, i) => (
-                    <div key={i} className="mb-1 leading-relaxed text-gray-300 whitespace-pre-wrap break-all">
-                        {line}
-                    </div>
-                ))}
-                <div ref={endRef} />
+            <div className="flex-1 bg-[#050505]/90 p-4 relative" style={{ overflow: 'hidden' }}>
+                <div ref={terminalRef} className="absolute inset-4" />
             </div>
 
             <form onSubmit={handleCommand} className="p-3 bg-black/40 border-t border-white/5 flex gap-3">

@@ -119,7 +119,7 @@ export const CreateServerWizard = () => {
                                 className="w-full glass-input"
                             >
                                 {providers.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                    <option className="bg-slate-900 text-white" key={p.id} value={p.id}>{p.name}</option>
                                 ))}
                             </select>
                         </div>
@@ -139,7 +139,7 @@ export const CreateServerWizard = () => {
                                 >
                                     {versions.map(v => {
                                         const val = typeof v === 'string' ? v : v.version;
-                                        return <option key={val} value={val}>{val}</option>;
+                                        return <option className="bg-slate-900 text-white" key={val} value={val}>{val}</option>;
                                     })}
                                 </select>
                             )}

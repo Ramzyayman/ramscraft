@@ -3,6 +3,7 @@ import { ServerStatus } from '@ramscraft/shared';
 import { processService } from './ProcessService';
 import { pingMinecraft } from '../utils/mcping';
 import { serverRoot } from '../utils/paths';
+import { runOk } from '../utils/exec';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,6 +16,13 @@ export class ReconciliationService {
 
     public async reconcileOnStartup(): Promise<void> {
         console.log('[Reconciliation] Starting full state reconciliation...');
+        
+        // Clean up orphaned log tails left behind across backend restarts (due to systemd KillMode=process)
+        try {
+            await runOk('pkill', ['-f', 'tail -F -n 0 .*ramscraft_']);
+            console.log('[Reconciliation] Cleaned up orphaned tail processes.');
+        } catch (e) {}
+
         const servers = await prisma.server.findMany();
 
         for (const server of servers) {

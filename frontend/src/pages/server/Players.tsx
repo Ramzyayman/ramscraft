@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast';
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
@@ -32,9 +33,13 @@ export const Players = () => {
     const executeCommand = async (command: string, player: string) => {
         try {
             await axios.post(`/api/servers/${id}/players/command`, { command, player });
-            // alert(`Executed ${command} on ${player}`);
-        } catch (e) {
-            console.error('Command failed');
+            toast.success(`Successfully executed '${command}' on ${player}`);
+            if (command === 'kick' || command === 'ban') {
+                setPlayers(prev => prev.filter(p => p.name !== player));
+                setOnlineCount(prev => Math.max(0, prev - 1));
+            }
+        } catch (e: any) {
+            toast.error(e.response?.data?.error || 'Command failed');
         }
     };
 

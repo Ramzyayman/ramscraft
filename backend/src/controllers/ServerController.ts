@@ -25,12 +25,12 @@ function validatePort(port: any): string | null {
 export class ServerController {
 
     static async listServers(req: Request, res: Response) {
-        const servers = await prisma.server.findMany({ include: { software: true } });
+        const servers = await prisma.server.findMany({ include: { software: true, javaRuntime: true } });
         res.json(servers);
     }
 
     static async getServer(req: Request, res: Response) {
-        const server = await prisma.server.findUnique({ where: { id: req.params.id }, include: { software: true } });
+        const server = await prisma.server.findUnique({ where: { id: req.params.id }, include: { software: true, javaRuntime: true } });
         if (!server) return res.status(404).json({ error: 'Server not found' });
         res.json(server);
     }

@@ -14,6 +14,7 @@ export interface Server {
     status: ServerStatus;
     software?: ServerSoftware | null;
     javaRuntimeId?: string | null;
+    javaRuntime?: { id: string; name: string; majorVersion: number; path: string } | null;
     port: number;
     publicAddress?: string;
     minRamMb: number;

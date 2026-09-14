@@ -15,6 +15,7 @@ import { Software } from './pages/server/Software';
 import { io } from 'socket.io-client';
 import { useServersStore } from './store/useServersStore';
 import { getToken } from './api';
+import { Toaster } from 'react-hot-toast';
 
 // Pass the optional access token on the WebSocket handshake (see api.ts).
 export const socket = io({ autoConnect: false, auth: (cb) => cb({ token: getToken() || undefined }) });
@@ -27,6 +28,10 @@ function App() {
         
         socket.on('serverStatus', (data: { serverId: string, status: any }) => {
             updateServerStatus(data.serverId, data.status);
+            // Re-fetch servers when going offline (e.g. crash) to update flags like eulaAccepted
+            if (data.status === 'OFFLINE' || data.status === 'CRASHED') {
+                useServersStore.getState().fetchServers();
+            }
         });
 
         return () => {
@@ -35,26 +40,44 @@ function App() {
     }, []);
 
     return (
-        <BrowserRouter>
-            <Routes>
-                <Route path="/" element={<GlobalLayout />}>
-                    <Route index element={<Dashboard />} />
-                    <Route path="create" element={<CreateServerWizard />} />
-                    
-                    <Route path="server/:id" element={<ServerLayout />}>
-                        <Route index element={<Navigate to="overview" replace />} />
-                        <Route path="overview" element={<ServerOverview />} />
-                        <Route path="console" element={<ServerConsolePage />} />
-                        <Route path="settings" element={<Settings />} />
-                        <Route path="players" element={<Players />} />
-                        <Route path="software" element={<Software />} />
-                        <Route path="files" element={<Files />} />
-                        <Route path="worlds" element={<Worlds />} />
-                        <Route path="backups" element={<Backups />} />
+        <>
+            <Toaster 
+                position="bottom-right"
+                toastOptions={{
+                    style: {
+                        background: '#1a1b1e',
+                        color: '#fff',
+                        border: '1px solid rgba(255,255,255,0.1)'
+                    },
+                    success: {
+                        iconTheme: { primary: '#10b981', secondary: '#fff' }
+                    },
+                    error: {
+                        iconTheme: { primary: '#ef4444', secondary: '#fff' }
+                    }
+                }}
+            />
+            <BrowserRouter>
+                <Routes>
+                    <Route path="/" element={<GlobalLayout />}>
+                        <Route index element={<Dashboard />} />
+                        <Route path="create" element={<CreateServerWizard />} />
+                        
+                        <Route path="server/:id" element={<ServerLayout />}>
+                            <Route index element={<Navigate to="overview" replace />} />
+                            <Route path="overview" element={<ServerOverview />} />
+                            <Route path="console" element={<ServerConsolePage />} />
+                            <Route path="settings" element={<Settings />} />
+                            <Route path="players" element={<Players />} />
+                            <Route path="software" element={<Software />} />
+                            <Route path="files" element={<Files />} />
+                            <Route path="worlds" element={<Worlds />} />
+                            <Route path="backups" element={<Backups />} />
+                        </Route>
                     </Route>
-                </Route>
-            </Routes>
-        </BrowserRouter>
+                </Routes>
+            </BrowserRouter>
+        </>
     );
 }
 

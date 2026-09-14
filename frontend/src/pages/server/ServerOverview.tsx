@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast';
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useServersStore } from '../../store/useServersStore';
@@ -49,7 +50,9 @@ export const ServerOverview = () => {
     const { id } = useParams<{id: string}>();
     const server = useServersStore(s => s.servers.find(srv => srv.id === id));
     
-    const [stats, setStats] = useState<{cpu: number, memory: number, uptimeMs: number} | null>(null);
+    const [stats, setStats] = useState<{cpu: number, memory: number, uptimeMs: number, players: {online: number, max: number} | null} | null>(null);
+
+    const [isRestarting, setIsRestarting] = useState(false);
 
     useEffect(() => {
         if (!server || (server.status !== 'ONLINE' && server.status !== 'STARTING')) {
@@ -77,18 +80,38 @@ export const ServerOverview = () => {
     const handlePower = async (action: 'start' | 'stop') => {
         try {
             await axios.post(`/api/servers/${id}/lifecycle/${action}`);
+            toast.success(`Server ${action} command sent`);
         } catch (error: any) {
             console.error('Power action failed', error);
-            alert(`Failed to ${action} server: ${error.response?.data?.error || error.message}`);
+            toast.error(`Failed to ${action} server: ${error.response?.data?.error || error.message}`);
         }
     };
+
+    const handleRestart = async () => {
+        try {
+            setIsRestarting(true);
+            toast.success('Restart initiated...');
+            await axios.post(`/api/servers/${id}/lifecycle/stop`);
+            // The status state will asynchronously update. 
+            // In a real app we'd wait for offline, but this is a simple naive approach
+            setTimeout(async () => {
+                try {
+                    await axios.post(`/api/servers/${id}/lifecycle/start`);
+                } catch(e) {}
+                setIsRestarting(false);
+            }, 3000);
+        } catch (error: any) {
+            setIsRestarting(false);
+            toast.error(`Restart failed: ${error.message}`);
+        }
+    }
 
     const handleEula = async () => {
         try {
             await axios.post(`/api/servers/${id}/lifecycle/eula`);
             useServersStore.getState().fetchServers();
         } catch (error: any) {
-            alert(`Failed to accept EULA: ${error.message}`);
+            toast.error(`Failed to accept EULA: ${error.message}`);
         }
     };
 
@@ -116,100 +139,111 @@ export const ServerOverview = () => {
                             <>
                                 <button 
                                     onClick={() => handlePower('start')}
-                                    disabled={server.status !== 'OFFLINE'}
+                                    disabled={server.status !== 'OFFLINE' && server.status !== 'CRASHED'}
                                     className="flex-1 bg-[#2ed573]/20 hover:bg-[#2ed573]/30 text-[#2ed573] border border-[#2ed573]/30 disabled:opacity-30 disabled:hover:bg-[#2ed573]/20 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(46,213,115,0.1)]"
                                 >
                                     <Play size={18} fill="currentColor" />
-                                    Start Server
+                                    Start
+                                </button>
+                                <button 
+                                    onClick={handleRestart}
+                                    disabled={server.status === 'OFFLINE' || server.status === 'CRASHED' || isRestarting}
+                                    className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-500 border border-amber-500/30 disabled:opacity-30 disabled:hover:bg-amber-500/20 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                    Restart
                                 </button>
                                 <button 
                                     onClick={() => handlePower('stop')}
-                                    disabled={server.status === 'OFFLINE' || server.status === 'STOPPING'}
+                                    disabled={server.status === 'OFFLINE' || server.status === 'CRASHED' || server.status === 'STOPPING'}
                                     className="flex-1 bg-[#ff4757]/20 hover:bg-[#ff4757]/30 text-[#ff4757] border border-[#ff4757]/30 disabled:opacity-30 disabled:hover:bg-[#ff4757]/20 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(255,71,87,0.1)]"
                                 >
                                     <Square size={18} fill="currentColor" />
-                                    Stop Server
+                                    Stop
                                 </button>
                             </>
                         )}
                     </div>
                 </div>
 
-                {/* Info Card */}
-                <div className="glass-panel rounded-xl p-0 overflow-hidden">
+                {/* Connection Information */}
+                <div className="glass-panel rounded-xl overflow-hidden">
                     <div className="p-5 border-b border-white/[0.04] bg-white/[0.02]">
                         <h3 className="text-lg font-semibold text-white">Connection Details</h3>
                     </div>
-                    <div className="p-6 space-y-6">
+                    <div className="p-6 flex items-center justify-between">
                         <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block">Local Address</label>
-                            <div className="flex items-center gap-2">
-                                <code className="bg-black/40 px-3 py-2 rounded border border-white/10 text-slate-200 font-mono text-sm flex-1">
-                                    {window.location.hostname}:{server.port}
-                                </code>
-                                <button 
-                                    onClick={() => copyToClipboard(`${window.location.hostname}:${server.port}`)}
-                                    className="glass-button px-4 py-2"
-                                >Copy</button>
+                            <div className="text-sm text-slate-400 mb-1">Local Address</div>
+                            <div className="text-xl font-mono text-blue-400">
+                                192.168.1.6:{server.port}
                             </div>
-                            <p className="text-xs text-slate-500 mt-2">Use this address to connect when on the same LAN or VPN.</p>
                         </div>
-                        <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2 block">Public Connection</label>
-                            {server.publicAddress ? (
-                                <div className="flex items-center gap-2">
-                                    <code className="bg-blue-900/20 px-3 py-2 rounded border border-blue-500/20 text-blue-300 font-mono text-sm flex-1">
-                                        {server.publicAddress}
-                                    </code>
-                                    <button 
-                                        onClick={() => copyToClipboard(server.publicAddress || '')}
-                                        className="glass-button bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20 px-4 py-2"
-                                    >Copy</button>
-                                </div>
-                            ) : (
-                                <div className="bg-black/20 border border-white/5 rounded p-3 flex items-center justify-between">
-                                    <span className="text-sm text-slate-400 italic">Not configured</span>
-                                    <span className="text-xs text-slate-500">Configure in Settings</span>
-                                </div>
-                            )}
-                        </div>
+                        <button 
+                            onClick={() => copyToClipboard(`192.168.1.6:${server.port}`)}
+                            className="glass-button px-4 py-2 text-sm text-slate-300 hover:text-white"
+                        >
+                            Copy
+                        </button>
                     </div>
+                    {server.publicAddress && (
+                        <div className="p-6 pt-0 flex items-center justify-between">
+                            <div>
+                                <div className="text-sm text-slate-400 mb-1">Public Address</div>
+                                <div className="text-xl font-mono text-emerald-400">
+                                    {server.publicAddress}:{server.port}
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => copyToClipboard(`${server.publicAddress}:${server.port}`)}
+                                className="glass-button px-4 py-2 text-sm text-slate-300 hover:text-white"
+                            >
+                                Copy
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
             <div className="flex flex-col gap-6">
-                {/* Metrics */}
-                <div className="glass-panel rounded-xl p-0 overflow-hidden">
+                {/* Live Metrics */}
+                <div className="glass-panel rounded-xl overflow-hidden h-full">
                     <div className="p-5 border-b border-white/[0.04] bg-white/[0.02]">
-                        <h3 className="text-lg font-semibold text-white">Live Metrics</h3>
+                        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <Cpu size={18} className="text-blue-400" /> Live Metrics
+                        </h3>
                     </div>
-                    <div className="p-5 space-y-6">
-                        <div>
-                            <div className="flex justify-between text-sm mb-1.5">
-                                <span className="text-slate-400 flex items-center gap-2"><Cpu size={14} /> CPU Usage</span>
-                                <span className="text-white font-semibold">{stats ? `${Math.round(stats.cpu)}%` : '0%'}</span>
+                    <div className="p-6">
+                        <div className="space-y-6">
+                            <div>
+                                <div className="flex justify-between text-sm mb-2">
+                                    <span className="text-slate-400 flex items-center gap-2"><Cpu size={14} /> CPU Usage</span>
+                                    <span className="text-white font-mono">{stats ? stats.cpu.toFixed(1) : '0.0'}%</span>
+                                </div>
+                                <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
+                                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${stats ? Math.min(100, stats.cpu) : 0}%` }}></div>
+                                </div>
                             </div>
-                            <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
-                                <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${stats ? Math.min(stats.cpu, 100) : 0}%` }}></div>
+                            <div>
+                                <div className="flex justify-between text-sm mb-2">
+                                    <span className="text-slate-400 flex items-center gap-2"><MemoryStick size={14} /> RAM Usage</span>
+                                    <span className="text-white font-mono">{stats ? (stats.memory / 1024 / 1024).toFixed(0) : '0'} MB / {server.maxRamMb} MB</span>
+                                </div>
+                                <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
+                                    <div className="bg-purple-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${stats ? Math.min(100, (stats.memory / 1024 / 1024) / server.maxRamMb * 100) : 0}%` }}></div>
+                                </div>
                             </div>
-                        </div>
-                        <div>
-                            <div className="flex justify-between text-sm mb-1.5">
-                                <span className="text-slate-400 flex items-center gap-2"><MemoryStick size={14} /> RAM Usage</span>
-                                <span className="text-white font-semibold">{stats ? `${formatBytes(stats.memory)} / ${server.maxRamMb} MB` : `0 MB / ${server.maxRamMb} MB`}</span>
-                            </div>
-                            <div className="w-full bg-black/40 rounded-full h-2 border border-white/5 overflow-hidden">
-                                <div className="bg-purple-500 h-2 rounded-full" style={{ width: `${stats ? Math.min((stats.memory / (server.maxRamMb * 1024 * 1024)) * 100, 100) : 0}%` }}></div>
-                            </div>
-                        </div>
-                        <div className="pt-2 border-t border-white/[0.04]">
-                            <div className="flex justify-between text-sm py-2">
-                                <span className="text-slate-400 flex items-center gap-2"><Users size={14} /> Players</span>
-                                <span className="text-white font-semibold">See Players tab</span>
-                            </div>
-                            <div className="flex justify-between text-sm py-2">
-                                <span className="text-slate-400 flex items-center gap-2"><Clock size={14} /> Uptime</span>
-                                <span className="text-white font-semibold">{stats ? formatUptime(stats.uptimeMs) : 'Offline'}</span>
+                            
+                            <div className="pt-2 border-t border-white/[0.04]">
+                                <div className="flex justify-between text-sm py-2">
+                                    <span className="text-slate-400 flex items-center gap-2"><Users size={14} /> Players</span>
+                                    <span className="text-white font-semibold">
+                                        {stats?.players ? `${stats.players.online}/${stats.players.max}` : '0/0'}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-sm py-2">
+                                    <span className="text-slate-400 flex items-center gap-2"><Clock size={14} /> Uptime</span>
+                                    <span className="text-white font-semibold">{stats ? formatUptime(stats.uptimeMs) : 'Offline'}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
