@@ -6,6 +6,8 @@ import { wsService } from '../services/WebSocketService';
 import { providerRegistry } from '../providers/ProviderRegistry';
 import { selectJavaRuntime } from '../utils/java';
 import { serverRoot } from '../utils/paths';
+import { launchFilePresent, readLaunchConfig } from '../providers/launch';
+import { isInstalling } from '../services/SoftwareInstallService';
 import fs from 'fs';
 import path from 'path';
 
@@ -41,14 +43,15 @@ export class LifecycleController {
             }
 
             if (!server.software) return res.status(400).json({ error: 'No software installed.' });
+            if (isInstalling(server.id)) return res.status(409).json({ error: 'Software is being installed. Start the server when it finishes.' });
 
-            const jarPath = path.join(serverDir, 'server.jar');
-            if (!fs.existsSync(jarPath)) {
-                return res.status(400).json({ error: 'Server jar is missing. Re-install the software before starting.' });
+            const launch = readLaunchConfig(serverDir);
+            if (!launchFilePresent(serverDir, launch)) {
+                return res.status(400).json({ error: 'Server software files are missing. Re-install the software before starting.' });
             }
 
             const provider = providerRegistry.get(server.software.provider);
-            const args = provider.getStartupArgs(server.minRamMb, server.maxRamMb, 'server.jar');
+            const args = provider.getStartupArgs(server.minRamMb, server.maxRamMb, launch);
 
             // Select a compatible, installed Java runtime (honours min AND max range).
             let selected;

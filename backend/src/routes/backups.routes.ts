@@ -8,6 +8,7 @@ import { run } from '../utils/exec';
 import { processService } from '../services/ProcessService';
 import { wsService } from '../services/WebSocketService';
 import { spawn } from 'child_process';
+import { isInstalling } from '../services/SoftwareInstallService';
 
 const router = Router();
 
@@ -138,6 +139,7 @@ router.post('/:id/backups/:file/restore', async (req, res) => {
         if (server.status !== ServerStatus.OFFLINE && server.status !== ServerStatus.CRASHED) {
             return res.status(400).json({ error: 'Server must be OFFLINE to restore a backup' });
         }
+        if (isInstalling(server.id)) return res.status(409).json({ error: 'Software is being installed. Restore when it finishes.' });
         // Belt and braces: never restore over a live process.
         if (await processService.hasSession(server.id)) {
             return res.status(400).json({ error: 'Server process is still running; stop it before restoring.' });

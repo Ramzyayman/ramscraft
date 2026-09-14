@@ -19,8 +19,9 @@ export const CreateServerWizard = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
+        // Modpacks need a search, so they're installed from the Software tab after creating the server.
         axios.get('/api/software/providers')
-            .then(res => setProviders(res.data))
+            .then(res => setProviders(res.data.filter((p: any) => !p.searchable)))
             .catch(e => console.error(e));
     }, []);
 
@@ -31,7 +32,7 @@ export const CreateServerWizard = () => {
                 .then(res => {
                     setVersions(res.data);
                     if (res.data.length > 0) {
-                        const val = typeof res.data[0] === 'string' ? res.data[0] : res.data[0].version;
+                        const val = typeof res.data[0] === 'string' ? res.data[0] : res.data[0].id;
                         setVersion(val);
                     } else {
                         setVersion('');
@@ -63,14 +64,17 @@ export const CreateServerWizard = () => {
             
             // Now fetch releases for the chosen version
             const relRes = await axios.get(`/api/software/providers/${software}/versions/${version}/releases`);
-            const releaseId = relRes.data.length > 0 ? relRes.data[0].id : null;
+            const releaseId = (relRes.data.find((r: any) => r.isStable) ?? relRes.data[0])?.id ?? null;
             
             if (releaseId) {
+                // Installs in the background; the Software tab shows its progress.
                 await axios.post(`/api/servers/${res.data.id}/software/install`, {
                     providerId: software,
                     mcVersion: version,
                     releaseId: releaseId
                 });
+                navigate(`/server/${res.data.id}/software`);
+                return;
             }
             navigate(`/server/${res.data.id}`);
         } catch (e: any) {
@@ -138,8 +142,8 @@ export const CreateServerWizard = () => {
                                     className="w-full glass-input"
                                 >
                                     {versions.map(v => {
-                                        const val = typeof v === 'string' ? v : v.version;
-                                        return <option className="bg-slate-900 text-white" key={val} value={val}>{val}</option>;
+                                        const val = typeof v === 'string' ? v : v.id;
+                                        return <option className="bg-slate-900 text-white" key={val} value={val}>{typeof v === 'string' ? v : v.label}</option>;
                                     })}
                                 </select>
                             )}

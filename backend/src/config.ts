@@ -38,6 +38,9 @@ export const config = {
     // Directory holding persistent console logs.
     logsDir: path.resolve(process.env.RAMSCRAFT_LOGS_DIR || path.join(process.cwd(), 'logs')),
 
+    // Shared download/build cache for software installs (e.g. Spigot BuildTools work tree).
+    cacheDir: path.resolve(process.env.RAMSCRAFT_CACHE_DIR || path.join(process.cwd(), '..', 'cache')),
+
     // Skip Minecraft-protocol confirmation of ONLINE (useful only for tests).
     trustProcessOnly: bool(process.env.RAMSCRAFT_TRUST_PROCESS_ONLY, false),
 };

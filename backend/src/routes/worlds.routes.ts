@@ -11,6 +11,8 @@ import { run } from '../utils/exec';
 import { selectJavaRuntime } from '../utils/java';
 import { providerRegistry } from '../providers/ProviderRegistry';
 import { processService } from '../services/ProcessService';
+import { launchFilePresent, readLaunchConfig } from '../providers/launch';
+import { isInstalling } from '../services/SoftwareInstallService';
 
 const router = Router();
 const upload = multer({ dest: 'uploads/', limits: { fileSize: 1024 * 1024 * 1024 } });
@@ -132,8 +134,9 @@ router.post('/:id/worlds/generate', resolveServer, async (req: any, res: any) =>
             return res.status(400).json({ error: 'Invalid world name (use letters, numbers, _ . - up to 64 chars)' });
         }
         if (!server.software) return res.status(400).json({ error: 'Install server software before generating a world.' });
-        const jarPath = path.join(serverDir, 'server.jar');
-        if (!fs.existsSync(jarPath)) return res.status(400).json({ error: 'Server jar is missing.' });
+        if (isInstalling(server.id)) return res.status(409).json({ error: 'Software is being installed. Try again when it finishes.' });
+        const launch = readLaunchConfig(serverDir);
+        if (!launchFilePresent(serverDir, launch)) return res.status(400).json({ error: 'Server software files are missing. Re-install the software first.' });
 
         const eulaPath = path.join(serverDir, 'eula.txt');
         if (!fs.existsSync(eulaPath) || !fs.readFileSync(eulaPath, 'utf8').includes('eula=true')) {
@@ -158,7 +161,7 @@ router.post('/:id/worlds/generate', resolveServer, async (req: any, res: any) =>
 
         // Run the server headlessly until it finishes generating, then stop it.
         const java = await selectJavaRuntime(server.software.mcVersion, server.javaRuntimeId);
-        const args = providerRegistry.get(server.software.provider).getStartupArgs(server.minRamMb, server.maxRamMb, 'server.jar');
+        const args = providerRegistry.get(server.software.provider).getStartupArgs(server.minRamMb, server.maxRamMb, launch);
 
         const generated = await runHeadlessGeneration(java.path, args, serverDir, 180_000);
         if (!generated) {

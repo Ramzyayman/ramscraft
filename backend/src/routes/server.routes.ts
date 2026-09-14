@@ -13,6 +13,7 @@ router.delete('/:id', ServerController.deleteServer);
 
 // Phase 2: Software Installation metadata setup
 router.post('/:serverId/software/install', SoftwareController.prepareInstallation);
+router.get('/:serverId/software/install', SoftwareController.installStatus);
 
 export default router;
 

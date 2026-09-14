@@ -1,11 +1,41 @@
-import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility, IDownloadInfo } from './ISoftwareProvider';
+import path from 'path';
+import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility, IDownloadInfo, InstallContext, InstallResult } from './ISoftwareProvider';
 import { cacheService } from '../services/MetadataCacheService';
 import { JavaVersionHelper } from './JavaVersionHelper';
+import { LaunchConfig, launchArgs, memoryArgs } from './launch';
+
+/** Aikar's flags, recommended for Paper and its forks (Purpur). */
+export function aikarFlags(memoryMin: number, memoryMax: number): string[] {
+    return [
+        ...memoryArgs(memoryMin, memoryMax),
+        '-XX:+UseG1GC',
+        '-XX:+ParallelRefProcEnabled',
+        '-XX:MaxGCPauseMillis=200',
+        '-XX:+UnlockExperimentalVMOptions',
+        '-XX:+DisableExplicitGC',
+        '-XX:+AlwaysPreTouch',
+        '-XX:G1NewSizePercent=30',
+        '-XX:G1MaxNewSizePercent=40',
+        '-XX:G1HeapRegionSize=8M',
+        '-XX:G1ReservePercent=20',
+        '-XX:G1HeapWastePercent=5',
+        '-XX:G1MixedGCCountTarget=4',
+        '-XX:InitiatingHeapOccupancyPercent=15',
+        '-XX:G1MixedGCLiveThresholdPercent=90',
+        '-XX:G1RSetUpdatingPauseTimePercent=5',
+        '-XX:SurvivorRatio=32',
+        '-XX:+PerfDisableSharedMem',
+        '-XX:MaxTenuringThreshold=1',
+        '-Dusing.aikars.flags=https://mcflags.emc.gs',
+        '-Daikars.new.flags=true',
+    ];
+}
 
 export class PaperProvider implements ISoftwareProvider {
     id = 'paper';
     name = 'Paper';
     category = 'High Performance Plugins';
+    labels = { version: 'Minecraft Version', release: 'Build' };
 
     private BASE_URL = 'https://fill.papermc.io/v3/projects/paper';
     private CACHE_TTL = 1000 * 60 * 60 * 1; // 1 hour for Paper builds
@@ -15,7 +45,7 @@ export class PaperProvider implements ISoftwareProvider {
             const response = await fetch(this.BASE_URL);
             if (!response.ok) throw new Error('Failed to fetch Paper versions');
             const data = await response.json();
-            
+
             const allVersions: string[] = [];
             if (data.versions) {
                 // The new v3 API groups versions by major release (e.g. "1.21" -> ["1.21.11", ...])
@@ -34,9 +64,9 @@ export class PaperProvider implements ISoftwareProvider {
             const response = await fetch(`${this.BASE_URL}/versions/${mcVersion}/builds`);
             if (!response.ok) throw new Error('Failed to fetch Paper builds');
             const data = await response.json();
-            
+
             if (!Array.isArray(data)) return [];
-            
+
             // v3 API returns an array of build objects (newest first)
             return data.map((build: any) => ({
                 id: build.id.toString(),
@@ -68,36 +98,13 @@ export class PaperProvider implements ISoftwareProvider {
         };
     }
 
-    async install(serverDir: string, mcVersion: string, release: ISoftwareRelease): Promise<void> {
-        console.log(`[PaperProvider] Installation prepared for ${mcVersion} build ${release.id}`);
+    async install(ctx: InstallContext): Promise<InstallResult> {
+        const info = await this.getDownloadInfo(ctx.mcVersion, ctx.release);
+        await ctx.download(info.url, path.join(ctx.stagingDir, 'server.jar'), { checksum: info.checksum, algo: info.checksumAlgo, label: 'Downloading Paper' });
+        return { launch: { jar: 'server.jar' }, files: ['server.jar'], sourceUrl: info.url };
     }
 
-    getStartupArgs(memoryMin: number, memoryMax: number, jarName: string): string[] {
-        // Aikar's flags are recommended for Paper
-        return [
-            '-Xms' + memoryMin + 'M', 
-            '-Xmx' + memoryMax + 'M', 
-            '-XX:+UseG1GC',
-            '-XX:+ParallelRefProcEnabled',
-            '-XX:MaxGCPauseMillis=200',
-            '-XX:+UnlockExperimentalVMOptions',
-            '-XX:+DisableExplicitGC',
-            '-XX:+AlwaysPreTouch',
-            '-XX:G1NewSizePercent=30',
-            '-XX:G1MaxNewSizePercent=40',
-            '-XX:G1HeapRegionSize=8M',
-            '-XX:G1ReservePercent=20',
-            '-XX:G1HeapWastePercent=5',
-            '-XX:G1MixedGCCountTarget=4',
-            '-XX:InitiatingHeapOccupancyPercent=15',
-            '-XX:G1MixedGCLiveThresholdPercent=90',
-            '-XX:G1RSetUpdatingPauseTimePercent=5',
-            '-XX:SurvivorRatio=32',
-            '-XX:+PerfDisableSharedMem',
-            '-XX:MaxTenuringThreshold=1',
-            '-Dusing.aikars.flags=https://mcflags.emc.gs',
-            '-Daikars.new.flags=true',
-            '-jar', jarName, 'nogui'
-        ];
+    getStartupArgs(memoryMin: number, memoryMax: number, launch: LaunchConfig): string[] {
+        return [...aikarFlags(memoryMin, memoryMax), ...launchArgs(launch)];
     }
 }
