@@ -18,8 +18,9 @@ export async function getMinecraftStats(host: string, port: number, timeoutMs = 
     try {
         const res = await util.status(host, port, { timeout: timeoutMs, enableSRV: false });
         return { online: res.players.online, max: res.players.max };
-    } catch (e) {
-        console.error(`getMinecraftStats failed for ${host}:${port}`, e);
+    } catch {
+        // Polled every couple of seconds while a server is viewed; a transient
+        // failure is normal (e.g. during shutdown) and must not spam the log.
         return null;
     }
 }

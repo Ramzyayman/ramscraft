@@ -1,7 +1,6 @@
 import { ChildProcess, spawn } from 'child_process';
 import { Server } from 'socket.io';
 import { processService } from './ProcessService';
-import { stripAnsi } from '../utils/ansi';
 import fs from 'fs';
 
 export class ConsoleStreamer {
@@ -54,6 +53,19 @@ export class ConsoleStreamer {
         if (tailProcess) {
             console.log(`[ConsoleStreamer] Stopping tail for ${serverId}`);
             tailProcess.kill();
+            this.streamers.delete(serverId);
+        }
+    }
+
+    /**
+     * Stop every tail this process owns. Called on shutdown so the backend never
+     * leaves orphaned `tail` children behind (systemd uses KillMode=process so that
+     * Minecraft servers survive a restart, which means our own children are ours to
+     * clean up). Only PIDs we spawned are signalled — never a pattern match.
+     */
+    public stopAll() {
+        for (const [serverId, tailProcess] of this.streamers) {
+            try { tailProcess.kill(); } catch { /* already gone */ }
             this.streamers.delete(serverId);
         }
     }

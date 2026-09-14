@@ -15,6 +15,7 @@ import { ReconciliationService } from './services/ReconciliationService';
 import { wsService } from './services/WebSocketService';
 import { MetricsStreamer } from './services/MetricsStreamer';
 import { JavaDiscoveryService } from './services/JavaDiscoveryService';
+import { consoleStreamer } from './services/ConsoleStreamer';
 import { authGuard, rateLimit } from './middleware/auth';
 
 export const prisma = new PrismaClient();
@@ -92,6 +93,24 @@ async function bootstrap() {
                 console.log('[auth] Loopback-only mode (no token). Front with nginx/RamsesHub or set RAMSCRAFT_API_TOKEN for remote access.');
             }
         });
+
+        // Graceful shutdown. systemd runs this unit with KillMode=process so that the
+        // Minecraft servers (detached tmux sessions) survive a backend restart; that
+        // makes OUR OWN children (the console `tail` processes) our responsibility.
+        // Stopping them here prevents orphan accumulation without any pattern-killing.
+        let shuttingDown = false;
+        const shutdown = (signal: string) => {
+            if (shuttingDown) return;
+            shuttingDown = true;
+            console.log(`[shutdown] ${signal} received; stopping console streams.`);
+            try { consoleStreamer.stopAll(); } catch { /* best effort */ }
+            metricsStreamer.stop();
+            server.close(() => process.exit(0));
+            // Don't hang forever on lingering sockets.
+            setTimeout(() => process.exit(0), 3000).unref();
+        };
+        process.on('SIGTERM', () => shutdown('SIGTERM'));
+        process.on('SIGINT', () => shutdown('SIGINT'));
     } catch (error) {
         console.error('Failed to start RamsCraft:', error);
         process.exit(1);
