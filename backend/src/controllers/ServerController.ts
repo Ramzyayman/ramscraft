@@ -6,6 +6,7 @@ import { prisma } from '../index';
 import { ServerStatus } from '@ramscraft/shared';
 import { processService } from '../services/ProcessService';
 import { serverRoot, slugifyServerName } from '../utils/paths';
+import pidusage from 'pidusage';
 
 const HOST_MEM_MB = Math.floor(os.totalmem() / 1024 / 1024);
 
@@ -33,6 +34,21 @@ export class ServerController {
         const server = await prisma.server.findUnique({ where: { id: req.params.id }, include: { software: true, javaRuntime: true } });
         if (!server) return res.status(404).json({ error: 'Server not found' });
         res.json(server);
+    }
+
+    /** Point-in-time CPU/RAM/uptime for API clients (the panel gets the same numbers live over socket.io). */
+    static async getStats(req: Request, res: Response) {
+        const server = await prisma.server.findUnique({ where: { id: req.params.id } });
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+        const pid = await processService.hasSession(server.id) ? await processService.getSessionPid(server.id) : null;
+        const usage = pid ? await pidusage(pid).catch(() => null) : null;
+        res.json({
+            status: server.status,
+            cpu: usage?.cpu ?? null,
+            memoryBytes: usage?.memory ?? null,
+            maxRamMb: server.maxRamMb,
+            uptimeMs: usage && server.lastStartedAt ? Date.now() - new Date(server.lastStartedAt).getTime() : null,
+        });
     }
 
     static async createServer(req: Request, res: Response) {

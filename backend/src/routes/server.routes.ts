@@ -8,6 +8,7 @@ const router = Router();
 router.get('/', ServerController.listServers);
 router.post('/', ServerController.createServer);
 router.get('/:id', ServerController.getServer);
+router.get('/:id/stats', ServerController.getStats);
 router.patch('/:id', ServerController.updateServer);
 router.delete('/:id', ServerController.deleteServer);
 
