@@ -23,3 +23,4 @@ router.post('/:id/lifecycle/start', LifecycleController.start);
 router.post('/:id/lifecycle/stop', LifecycleController.stop);
 router.post('/:id/lifecycle/kill', LifecycleController.kill);
 router.post('/:id/lifecycle/eula', LifecycleController.acceptEula);
+router.post('/:id/console', LifecycleController.console);

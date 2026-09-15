@@ -89,6 +89,17 @@ export class LifecycleController {
         res.json({ success: true });
     }
 
+    /** Run one console command and return what the server printed right after it (used by the Discord bot). */
+    static async console(req: Request, res: Response) {
+        const command = typeof req.body?.command === 'string' ? req.body.command.trim().replace(/^\//, '') : '';
+        if (!command || command.length > 500) return res.status(400).json({ error: 'Command must be 1-500 characters.' });
+        try {
+            res.json({ output: await processService.sendCommandCapture(req.params.id, command, { waitMs: 1500 }) });
+        } catch (e: any) {
+            res.status(e.message === 'Server is not running' ? 409 : 500).json({ error: e.message });
+        }
+    }
+
     static async acceptEula(req: Request, res: Response) {
         try {
             const server = await prisma.server.findUnique({ where: { id: req.params.id } });

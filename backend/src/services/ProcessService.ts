@@ -110,9 +110,9 @@ export class ProcessService {
 
     public async sendCommand(id: string, command: string): Promise<void> {
         if (!(await this.hasSession(id))) throw new Error('Server is not running');
-        // Console commands are single-line; strip newlines so a value cannot inject
-        // extra console lines. No shell is involved (argv), so shell metachars are inert.
-        const line = command.replace(/[\r\n]+/g, ' ');
+        // Console commands are single-line; strip newlines and other control characters
+        // (e.g. \x03 would reach the JVM as Ctrl+C). No shell is involved, so shell metachars are inert.
+        const line = command.replace(/[\x00-\x1f\x7f]+/g, ' ');
         const sessionName = this.getSessionName(id);
         // -l sends the text literally (no tmux key-name interpretation), then Enter.
         await run('tmux', ['send-keys', '-t', sessionName, '-l', '--', line]);
