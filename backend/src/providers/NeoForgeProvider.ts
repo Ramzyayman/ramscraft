@@ -2,26 +2,12 @@ import { ISoftwareProvider, ISoftwareRelease, IJavaCompatibility, InstallContext
 import { cacheService } from '../services/MetadataCacheService';
 import { JavaVersionHelper } from './JavaVersionHelper';
 import { LaunchConfig, launchArgs, memoryArgs } from './launch';
-import { compareVersionsDesc, fetchText } from './http';
+import { compareVersionsDesc, fetchText, neoForgeMcVersion } from './http';
 import { installForgeStyle } from './ForgeProvider';
 
-const MAVEN = 'https://maven.neoforged.net/releases/net/neoforged';
+export { neoForgeMcVersion };
 
-/**
- * NeoForge version -> Minecraft version.
- *   20.4.237 -> 1.20.4, 21.0.167 -> 1.21, 21.1.77 -> 1.21.1   (MINOR.PATCH of 1.x)
- *   26.1.2.108 -> 26.1.2, 26.2.0.88 -> 26.2                    (year-based MC versions, build last)
- * Legacy 1.20.1 builds live in net/neoforged/forge as "1.20.1-47.1.106".
- */
-export function neoForgeMcVersion(version: string): string | null {
-    if (version.startsWith('1.20.1-')) return '1.20.1';
-    const m = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-[\w.]+)?$/);
-    if (!m) return null; // e.g. "0.25w14craftmine" (April Fools)
-    const [, a, b, c, d] = m;
-    if (Number(a) >= 26) return d === undefined ? null : c === '0' ? `${a}.${b}` : `${a}.${b}.${c}`;
-    if (Number(a) < 20) return null;
-    return b === '0' ? `1.${a}` : `1.${a}.${b}`;
-}
+const MAVEN = 'https://maven.neoforged.net/releases/net/neoforged';
 
 /** NeoForge via its official installer (maven.neoforged.net). */
 export class NeoForgeProvider implements ISoftwareProvider {

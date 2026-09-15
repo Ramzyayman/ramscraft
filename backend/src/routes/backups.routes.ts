@@ -7,8 +7,15 @@ import { serverRoot } from '../utils/paths';
 import { run } from '../utils/exec';
 import { processService } from '../services/ProcessService';
 import { wsService } from '../services/WebSocketService';
-import { spawn } from 'child_process';
 import { isInstalling } from '../services/SoftwareInstallService';
+import { runTar } from '../utils/tar';
+import { selectJavaRuntime } from '../utils/java';
+import { launchFilePresent, readLaunchConfig, writeLaunchConfig } from '../providers/launch';
+import { providerRegistry } from '../providers/ProviderRegistry';
+import { detectSoftware, setServerPort } from '../services/detectSoftware';
+import {
+    CHUNK_BYTES, HttpError, cancelUpload, finishUpload, getUpload, startUpload, uploadStatus, writeChunk,
+} from '../services/backupUpload';
 
 const router = Router();
 
@@ -21,46 +28,6 @@ function progressReporter(serverId: string, operation: 'create' | 'restore') {
         last = `${phase}:${p}`;
         wsService.io?.emit('backupProgress', { serverId, operation, phase, percent: p });
     };
-}
-
-/**
- * Run tar (argv, no shell) while reporting progress in percent:
- *  - `input`: the archive is streamed into tar's stdin, so progress = archive bytes read.
- *  - `totalBytes`: GNU tar prints a checkpoint every 1000 records (10 KiB each), i.e. bytes archived.
- */
-function runTar(args: string[], opts: { input?: string; totalBytes?: number; onProgress: (percent: number) => void }):
-    Promise<{ code: number; stdout: string; stderr: string }> {
-    return new Promise(resolve => {
-        const child = spawn('tar', opts.totalBytes ? ['--checkpoint=1000', ...args] : args);
-        let stdout = '', stderr = '', pending = '';
-        const timer = setTimeout(() => child.kill('SIGKILL'), 30 * 60_000);
-
-        child.stdout.on('data', (b: Buffer) => { stdout += b.toString(); });
-        child.stderr.on('data', (b: Buffer) => {
-            const lines = (pending + b.toString()).split('\n');
-            pending = lines.pop() ?? '';
-            for (const line of lines) {
-                const cp = line.match(/(?:Read|Write) checkpoint (\d+)/);
-                if (cp && opts.totalBytes) opts.onProgress(Number(cp[1]) * 10240 / opts.totalBytes * 100);
-                else if (line) stderr += line + '\n';
-            }
-        });
-
-        if (opts.input) {
-            const size = fs.statSync(opts.input).size || 1;
-            let read = 0;
-            const stream = fs.createReadStream(opts.input);
-            stream.on('data', chunk => { read += chunk.length; opts.onProgress(read / size * 100); });
-            stream.on('error', () => child.kill());
-            child.stdin.on('error', () => { /* tar exited early; its exit code reports why */ });
-            stream.pipe(child.stdin);
-        } else {
-            child.stdin.end();
-        }
-
-        child.on('error', e => { clearTimeout(timer); resolve({ code: -1, stdout, stderr: e.message }); });
-        child.on('close', code => { clearTimeout(timer); resolve({ code: code ?? -1, stdout, stderr: stderr + pending }); });
-    });
 }
 
 function backupDirFor(directoryName: string): string {
@@ -76,6 +43,38 @@ function backupFilePath(directoryName: string, file: string): string {
         throw new Error('Invalid backup filename');
     }
     return path.join(backupDirFor(directoryName), base);
+}
+
+/**
+ * Point RamsCraft at the software found in a restored folder: how to start it, the Minecraft version
+ * and a matching Java. Returns what was detected, and a warning when the user needs to step in.
+ */
+async function adoptSoftware(server: { id: string; javaRuntimeId: string | null }, serverDir: string) {
+    const detected = detectSoftware(serverDir);
+    if (!detected) {
+        return { software: null, warning: 'No server software was found in this backup. Install one with Change Software; your files are kept.' };
+    }
+    const hasOwnLaunchConfig = fs.existsSync(path.join(serverDir, '.ramscraft', 'launch.json'));
+    if (!hasOwnLaunchConfig || !launchFilePresent(serverDir, readLaunchConfig(serverDir))) {
+        writeLaunchConfig(serverDir, detected.launch);
+    }
+
+    const previous = await prisma.software.findUnique({ where: { serverId: server.id } });
+    const mcVersion = detected.mcVersion ?? previous?.mcVersion ?? 'unknown';
+    const data = { provider: detected.provider, mcVersion, releaseId: detected.releaseId, installerUrl: null };
+    await prisma.software.upsert({ where: { serverId: server.id }, update: data, create: { serverId: server.id, ...data } });
+
+    let warning: string | null = detected.mcVersion ? null
+        : 'The Minecraft version could not be detected. If the server does not start, reinstall its software with Change Software.';
+    let java: number | null = null;
+    try {
+        const selected = await selectJavaRuntime(mcVersion);
+        await prisma.server.update({ where: { id: server.id }, data: { javaRuntimeId: selected.id } });
+        java = selected.majorVersion;
+    } catch (e: any) {
+        warning = e.message;
+    }
+    return { software: { ...data, providerName: providerRegistry.get(detected.provider).name, java }, warning };
 }
 
 router.get('/:id/backups', async (req, res) => {
@@ -186,11 +185,68 @@ router.post('/:id/backups/:file/restore', async (req, res) => {
         tmpDir = null;
         if (fs.existsSync(oldDir)) fs.rmSync(oldDir, { recursive: true, force: true });
 
-        res.json({ success: true, message: 'Restore complete', entries: entries.length });
+        // A backup may come from another machine: keep this server's port and adopt the software it contains.
+        setServerPort(serverDir, server.port);
+        const adopted = await adoptSoftware(server, serverDir);
+
+        res.json({ success: true, message: 'Restore complete', entries: entries.length, ...adopted });
     } catch (e: any) {
         if (tmpDir && fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
         res.status(500).json({ error: e.message });
     }
+});
+
+// ---------------------------------------------------------------- uploaded backups (chunked)
+
+const sendError = (res: any, e: any, extra: object = {}) =>
+    res.status(e instanceof HttpError ? e.status : 500).json({ error: e.message, ...extra });
+
+router.post('/:id/backups/upload', async (req, res) => {
+    try {
+        const server = await prisma.server.findUnique({ where: { id: req.params.id } });
+        if (!server) return res.status(404).json({ error: 'Server not found' });
+        const { filename, size } = req.body ?? {};
+        if (typeof filename !== 'string' || filename.length > 255) return res.status(400).json({ error: 'Invalid file name' });
+        const upload = startUpload(server.id, backupDirFor(server.directoryName), filename, size);
+        res.status(201).json({ uploadId: upload.id, chunkSize: CHUNK_BYTES });
+    } catch (e: any) {
+        sendError(res, e);
+    }
+});
+
+// Raw bytes (application/octet-stream), sent in order: ?offset=<bytes already received>
+router.put('/:id/backups/upload/:uploadId', async (req, res) => {
+    const upload = getUpload(req.params.id, req.params.uploadId);
+    if (!upload) return res.status(404).json({ error: 'Upload not found. It may have expired; start it again.' });
+    try {
+        await writeChunk(upload, Number(req.query.offset), req);
+        res.json({ received: upload.received });
+    } catch (e: any) {
+        sendError(res, e, { received: upload.received });
+    }
+});
+
+router.post('/:id/backups/upload/:uploadId/complete', (req, res) => {
+    const upload = getUpload(req.params.id, req.params.uploadId);
+    if (!upload) return res.status(404).json({ error: 'Upload not found. It may have expired; start it again.' });
+    try {
+        finishUpload(upload);
+        res.status(202).json(uploadStatus(upload));
+    } catch (e: any) {
+        sendError(res, e);
+    }
+});
+
+router.get('/:id/backups/upload/:uploadId', (req, res) => {
+    const upload = getUpload(req.params.id, req.params.uploadId);
+    if (!upload) return res.status(404).json({ error: 'Upload not found' });
+    res.json(uploadStatus(upload));
+});
+
+router.delete('/:id/backups/upload/:uploadId', (req, res) => {
+    const upload = getUpload(req.params.id, req.params.uploadId);
+    if (upload) cancelUpload(upload);
+    res.json({ success: true });
 });
 
 router.delete('/:id/backups/:file', async (req, res) => {

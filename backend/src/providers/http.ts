@@ -39,3 +39,19 @@ export function compareVersionsDesc(a: string, b: string): number {
     if (y.pre === null) return 1;
     return y.pre.localeCompare(x.pre, undefined, { numeric: true });
 }
+
+/**
+ * NeoForge version -> Minecraft version.
+ *   20.4.237 -> 1.20.4, 21.0.167 -> 1.21, 21.1.77 -> 1.21.1   (MINOR.PATCH of 1.x)
+ *   26.1.2.108 -> 26.1.2, 26.2.0.88 -> 26.2                    (year-based MC versions, build last)
+ * Legacy 1.20.1 builds live in net/neoforged/forge as "1.20.1-47.1.106".
+ */
+export function neoForgeMcVersion(version: string): string | null {
+    if (version.startsWith('1.20.1-')) return '1.20.1';
+    const m = version.match(/^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-[\w.]+)?$/);
+    if (!m) return null; // e.g. "0.25w14craftmine" (April Fools)
+    const [, a, b, c, d] = m;
+    if (Number(a) >= 26) return d === undefined ? null : c === '0' ? `${a}.${b}` : `${a}.${b}.${c}`;
+    if (Number(a) < 20) return null;
+    return b === '0' ? `1.${a}` : `1.${a}.${b}`;
+}
